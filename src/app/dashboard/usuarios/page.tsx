@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase-client";
-import { Users, Plus, RotateCcw, Trash2, KeyRound } from "lucide-react";
+import { Users, Plus, Trash2, KeyRound, RotateCcw, Copy, Mail, Eye } from "lucide-react";
 import { etiquetaRol, ROLES, type Rol } from "@/lib/rbac";
 
 interface PerfilRow {
@@ -22,6 +22,7 @@ export default function UsuariosPage() {
   const [aviso, setAviso] = useState<{ tipo: "ok" | "err"; msg: string } | null>(null);
   const [modal, setModal] = useState(false);
   const [confirmElim, setConfirmElim] = useState<string | null>(null);
+  const [resetTarget, setResetTarget] = useState<PerfilRow | null>(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -86,12 +87,6 @@ export default function UsuariosPage() {
     if (ok) setConfirmElim(null);
   }
 
-  const badgeColor: Record<string, { bg: string; fg: string }> = {
-    super_admin: { bg: "#ede9fe", fg: "#6d28d9" },
-    admin: { bg: "#e8eef5", fg: "#1e3a5f" },
-    demo: { bg: "#f0f2f5", fg: "#64748b" },
-  };
-
   return (
     <div style={{ padding: "36px 40px 60px", maxWidth: 1100 }}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
@@ -139,7 +134,6 @@ export default function UsuariosPage() {
             <tbody>
               {perfiles.map((p) => {
                 const soyYo = p.id === yo;
-                const bc = badgeColor[p.rol] ?? badgeColor.demo;
                 return (
                   <tr key={p.id}>
                     <td>
@@ -182,17 +176,26 @@ export default function UsuariosPage() {
                       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                         <button
                           className="btn btn-ghost"
-                          title="Reset 2FA"
+                          title="Resetear contraseña"
                           disabled={soyYo}
-                          onClick={() => resetTotp(p.id)}
+                          onClick={() => !soyYo && setResetTarget(p)}
                           style={{ padding: "5px 8px", opacity: soyYo ? 0.3 : 1 }}
                         >
                           <KeyRound size={14} strokeWidth={1.75} />
                         </button>
                         <button
+                          className="btn btn-ghost"
+                          title="Resetear 2FA"
+                          disabled={soyYo}
+                          onClick={() => !soyYo && resetTotp(p.id)}
+                          style={{ padding: "5px 8px", opacity: soyYo ? 0.3 : 1 }}
+                        >
+                          <RotateCcw size={14} strokeWidth={1.75} />
+                        </button>
+                        <button
                           title="Eliminar usuario"
                           disabled={soyYo}
-                          onClick={() => setConfirmElim(p.id)}
+                          onClick={() => !soyYo && setConfirmElim(p.id)}
                           style={{
                             padding: "5px 8px", border: "1px solid var(--red)", borderRadius: 6,
                             background: "transparent", color: "var(--red)", cursor: soyYo ? "not-allowed" : "pointer",
@@ -211,13 +214,11 @@ export default function UsuariosPage() {
         )}
       </div>
 
-      {/* Modal: Nuevo usuario */}
       {modal && <ModalNuevoUsuario onClose={() => setModal(false)} onCreated={() => { setModal(false); cargar(); setAviso({ tipo: "ok", msg: "Usuario creado exitosamente." }); }} />}
 
-      {/* Modal: Confirmar eliminación */}
       {confirmElim && (
-        <div onClick={() => setConfirmElim(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,22,40,0.4)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", zIndex: 100, padding: 24 }}>
-          <div onClick={(e) => e.stopPropagation()} className="panel" style={{ maxWidth: 400, padding: "32px 28px" }}>
+        <Overlay onClose={() => setConfirmElim(null)}>
+          <div className="panel" style={{ maxWidth: 400, padding: "32px 28px" }}>
             <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Eliminar usuario</h3>
             <p style={{ color: "var(--text-dim)", fontSize: 13.5, marginBottom: 20 }}>
               Esta acción es irreversible. Se eliminará la cuenta y todos los datos asociados.
@@ -227,12 +228,196 @@ export default function UsuariosPage() {
               <button className="btn btn-danger" onClick={() => eliminar(confirmElim)}>Eliminar</button>
             </div>
           </div>
-        </div>
+        </Overlay>
+      )}
+
+      {resetTarget && (
+        <ModalResetPassword
+          perfil={resetTarget}
+          onClose={() => setResetTarget(null)}
+          onDone={(msg) => {
+            setResetTarget(null);
+            setAviso({ tipo: "ok", msg });
+          }}
+          onError={(msg) => {
+            setResetTarget(null);
+            setAviso({ tipo: "err", msg });
+          }}
+        />
       )}
     </div>
   );
 }
 
+// =====================================================================
+// Modal: Reset Password
+// =====================================================================
+function ModalResetPassword({
+  perfil,
+  onClose,
+  onDone,
+  onError,
+}: {
+  perfil: PerfilRow;
+  onClose: () => void;
+  onDone: (msg: string) => void;
+  onError: (msg: string) => void;
+}) {
+  const [procesando, setProcesando] = useState(false);
+  const [resultado, setResultado] = useState<{
+    password: string | null;
+    emailSent: boolean;
+    warning: string | null;
+  } | null>(null);
+  const [copiado, setCopiado] = useState(false);
+
+  async function resetear(method: "email" | "pantalla") {
+    setProcesando(true);
+    try {
+      const res = await fetch("/api/usuarios/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: perfil.id, method }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setProcesando(false);
+        onError(data.error ?? "Error al resetear contraseña");
+        return;
+      }
+
+      if (data.emailSent && !data.password) {
+        // Email sent successfully, no password to show
+        onDone(`Contraseña reseteada y enviada por email a ${perfil.email}.`);
+        return;
+      }
+
+      // Show password (either method=pantalla, or email failed with fallback)
+      setResultado({
+        password: data.password ?? null,
+        emailSent: data.emailSent ?? false,
+        warning: data.warning ?? null,
+      });
+      setProcesando(false);
+    } catch {
+      setProcesando(false);
+      onError("Error de conexión al resetear contraseña.");
+    }
+  }
+
+  async function copiar() {
+    if (!resultado?.password) return;
+    await navigator.clipboard.writeText(resultado.password);
+    setCopiado(true);
+    setTimeout(() => setCopiado(false), 2000);
+  }
+
+  return (
+    <Overlay onClose={onClose}>
+      <div className="panel" style={{ maxWidth: 480, padding: "32px 28px", width: "100%" }}>
+        <h3 style={{ fontSize: 18, fontWeight: 600, marginBottom: 6 }}>Resetear contraseña</h3>
+        <p style={{ color: "var(--text-dim)", fontSize: 13.5, marginBottom: 4 }}>
+          Usuario: <strong>{perfil.email}</strong>
+        </p>
+        <p style={{ color: "var(--text-faint)", fontSize: 12.5, marginBottom: 24, lineHeight: 1.5 }}>
+          Se generará una contraseña temporal segura. El 2FA del usuario no se verá afectado.
+        </p>
+
+        {!resultado ? (
+          <>
+            {/* Initial state: choose method */}
+            <div style={{ display: "grid", gap: 10 }}>
+              <button
+                className="btn btn-primary"
+                onClick={() => resetear("email")}
+                disabled={procesando}
+                style={{ justifyContent: "flex-start", padding: "12px 18px" }}
+              >
+                <Mail size={16} strokeWidth={1.75} />
+                <div style={{ textAlign: "left" }}>
+                  <div style={{ fontSize: 14 }}>{procesando ? "Procesando…" : "Generar y enviar por email"}</div>
+                  <div style={{ fontSize: 11, opacity: 0.7, fontWeight: 400 }}>Se envía a {perfil.email}</div>
+                </div>
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={() => resetear("pantalla")}
+                disabled={procesando}
+                style={{ justifyContent: "flex-start", padding: "12px 18px" }}
+              >
+                <Eye size={16} strokeWidth={1.75} />
+                <div style={{ textAlign: "left" }}>
+                  <div style={{ fontSize: 14 }}>{procesando ? "Procesando…" : "Generar y mostrar en pantalla"}</div>
+                  <div style={{ fontSize: 11, opacity: 0.5, fontWeight: 400 }}>Para compartir por canal seguro (1Password, Signal)</div>
+                </div>
+              </button>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 13 }}>Cancelar</button>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Result state: show password */}
+            {resultado.warning && (
+              <div style={{
+                background: "var(--amber-soft)", border: "1px solid rgba(200,132,31,0.2)",
+                borderRadius: 6, padding: "10px 14px", fontSize: 13, color: "var(--amber-deep)",
+                marginBottom: 16, lineHeight: 1.5,
+              }}>
+                {resultado.warning}
+              </div>
+            )}
+
+            {resultado.password && (
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-dim)", display: "block", marginBottom: 8 }}>
+                  Contraseña temporal
+                </label>
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  background: "#0F1F3A", borderRadius: 8, padding: "14px 16px",
+                }}>
+                  <code style={{
+                    flex: 1, fontFamily: "var(--font-mono)", fontSize: 16, fontWeight: 600,
+                    color: "#E5C77A", letterSpacing: "0.03em", userSelect: "all",
+                  }}>
+                    {resultado.password}
+                  </code>
+                  <button
+                    onClick={copiar}
+                    style={{
+                      background: "rgba(229,199,122,0.15)", border: "none", borderRadius: 6,
+                      padding: "6px 10px", cursor: "pointer", display: "inline-flex",
+                      alignItems: "center", gap: 4, color: "#E5C77A", fontFamily: "inherit",
+                      fontSize: 12, fontWeight: 600,
+                    }}
+                  >
+                    <Copy size={13} strokeWidth={1.75} />
+                    {copiado ? "Copiada" : "Copiar"}
+                  </button>
+                </div>
+                <p style={{ fontSize: 11.5, color: "var(--text-faint)", marginTop: 8, lineHeight: 1.5 }}>
+                  Comparte esta contraseña por un canal seguro. El usuario ingresa con ella + su 2FA existente.
+                </p>
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button className="btn btn-primary" onClick={() => onDone("Contraseña reseteada exitosamente.")} style={{ fontSize: 13 }}>
+                Listo
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </Overlay>
+  );
+}
+
+// =====================================================================
+// Modal: Nuevo Usuario (unchanged logic)
+// =====================================================================
 function ModalNuevoUsuario({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -264,8 +449,8 @@ function ModalNuevoUsuario({ onClose, onCreated }: { onClose: () => void; onCrea
   }
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(10,22,40,0.4)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", zIndex: 100, padding: 24 }}>
-      <div onClick={(e) => e.stopPropagation()} className="panel" style={{ width: "100%", maxWidth: 460, padding: "36px 32px" }}>
+    <Overlay onClose={onClose}>
+      <div className="panel" style={{ width: "100%", maxWidth: 460, padding: "36px 32px" }}>
         <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 6 }}>Nuevo usuario</h2>
         <p style={{ color: "var(--text-dim)", fontSize: 13.5, marginBottom: 24 }}>Crea una cuenta con acceso al sistema.</p>
 
@@ -305,6 +490,26 @@ function ModalNuevoUsuario({ onClose, onCreated }: { onClose: () => void; onCrea
             </button>
           </div>
         </div>
+      </div>
+    </Overlay>
+  );
+}
+
+// =====================================================================
+// Overlay reutilizable
+// =====================================================================
+function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(10,22,40,0.4)",
+        backdropFilter: "blur(6px)", display: "grid", placeItems: "center",
+        zIndex: 100, padding: 24,
+      }}
+    >
+      <div onClick={(e) => e.stopPropagation()}>
+        {children}
       </div>
     </div>
   );
