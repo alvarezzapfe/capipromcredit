@@ -180,8 +180,7 @@ export default function Acceso() {
             textTransform: "uppercase",
           }}
         >
-          Herramienta interna &middot; El primer usuario del sistema es super
-          admin
+          &copy; 2026 CapiProm Credit &middot; Todos los derechos reservados
         </div>
       </div>
     </main>
@@ -231,6 +230,18 @@ function CredencialesForm({
         }}
       >
         Ingresa con tus credenciales. Se te pedirá tu segundo factor.
+      </p>
+      <p
+        style={{
+          fontSize: 13,
+          color: "var(--texto-tenue)",
+          marginBottom: 32,
+          lineHeight: 1.6,
+          opacity: 0.75,
+        }}
+      >
+        CapiProm Credit es la plataforma de administración de cartera,
+        originación y cobranza de crédito.
       </p>
 
       <div style={{ display: "grid", gap: 22 }}>
