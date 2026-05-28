@@ -2,9 +2,26 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CapiProm — Gestión de Crédito",
+  title: {
+    default: "CapiProm Credit — Gestión integral de crédito",
+    template: "%s · CapiProm Credit",
+  },
   description:
-    "Plataforma de originación, cartera y cobranza de crédito. Solicita, gestiona y da seguimiento.",
+    "Plataforma interna de CapiProm para originación, gestión de cartera, cobranza y reportes de crédito. Administra solicitudes, créditos vigentes, flujos de pago y reportes regulatorios en un solo lugar.",
+  applicationName: "CapiProm Credit",
+  authors: [{ name: "CapiProm" }],
+  keywords: ["crédito", "cartera", "cobranza", "SOFOM", "originación", "fintech México"],
+  icons: {
+    icon: [
+      { url: "/favicon.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.png",
+    apple: "/favicon.png",
+  },
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default function RootLayout({
