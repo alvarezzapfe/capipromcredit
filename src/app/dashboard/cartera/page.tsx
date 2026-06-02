@@ -1,19 +1,18 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase-client";
 import { mxn, pct, fecha, labelEstatus, ESTATUS_CREDITO, TIPO_PRODUCTO_LABEL, TIPO_PRODUCTO_FULL, GARANTIA_LABEL } from "@/lib/format";
-import { Briefcase, Plus, Trash2 } from "lucide-react";
+import { Briefcase, Plus, Trash2, Upload, Download } from "lucide-react";
 import {
   generarTablaAmortizacion, calcularGraciaPeridos,
   type Frecuencia, type MetodoAmort, type TipoGracia,
 } from "@/lib/amortizacion";
 import { calcularFactoraje, type DesgloseFactoraje } from "@/lib/factoraje";
+import { construirOperacion, type InputOperacion, type TipoProducto } from "@/lib/operaciones";
 import { useRol } from "@/lib/useRol";
 import { esSoloLectura, puedeEliminar, puedeEliminarDesdeTabla, type Rol } from "@/lib/rbac";
 import { useIsMobile } from "@/lib/useIsMobile";
-
-type TipoProducto = "credito_simple" | "arrendamiento_financiero" | "arrendamiento_puro" | "factoraje";
 
 interface Credito {
   id: string;
@@ -80,6 +79,8 @@ export default function Cartera() {
   const [creditos, setCreditos] = useState<Credito[]>([]);
   const [cargando, setCargando] = useState(true);
   const [mostrarAlta, setMostrarAlta] = useState(false);
+  const [mostrarImport, setMostrarImport] = useState(false);
+  const [avisoImport, setAvisoImport] = useState<string | null>(null);
   const [detalle, setDetalle] = useState<Credito | null>(null);
   const [avisoElim, setAvisoElim] = useState<string | null>(null);
   const [elimDesdeTabla, setElimDesdeTabla] = useState<Credito | null>(null);
@@ -103,10 +104,17 @@ export default function Cartera() {
           <p style={{ color: "var(--text-dim)", marginTop: 4 }}>{creditos.length} crédito{creditos.length === 1 ? "" : "s"} en cartera.</p>
         </div>
         {!readOnly && (
-          <button className="btn btn-primary" onClick={() => setMostrarAlta(true)}>+ Originar crédito</button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="btn btn-ghost" onClick={descargarPlantilla} style={{ fontSize: 12.5, padding: "8px 14px" }}><Download size={14} strokeWidth={1.75} /> Plantilla</button>
+            <button className="btn btn-ghost" onClick={() => setMostrarImport(true)} style={{ fontSize: 12.5, padding: "8px 14px" }}><Upload size={14} strokeWidth={1.75} /> Importar</button>
+            <button className="btn btn-primary" onClick={() => setMostrarAlta(true)}>+ Originar crédito</button>
+          </div>
         )}
       </header>
 
+      {avisoImport && (
+        <div style={{ background: "var(--green-soft)", color: "var(--green)", padding: "11px 16px", borderRadius: 6, fontSize: 13.5, marginBottom: 18 }}>{avisoImport}</div>
+      )}
       {avisoElim && (
         <div style={{ background: "var(--green-soft)", color: "var(--green)", padding: "11px 16px", borderRadius: 6, fontSize: 13.5, marginBottom: 18 }}>{avisoElim}</div>
       )}
@@ -173,9 +181,364 @@ export default function Cartera() {
       </div>
 
       {mostrarAlta && <ModalAlta isMobile={isMobile} onClose={() => setMostrarAlta(false)} onSaved={() => { setMostrarAlta(false); cargar(); }} />}
+      {mostrarImport && <ModalImportar isMobile={isMobile} onClose={() => setMostrarImport(false)} onDone={(msg) => { setMostrarImport(false); cargar(); setAvisoImport(msg); setTimeout(() => setAvisoImport(null), 8000); }} />}
       {detalle && <ModalDetalle credito={detalle} rol={rol} isMobile={isMobile} onClose={() => setDetalle(null)} onChanged={cargar} onDeleted={(f) => { setDetalle(null); cargar(); setAvisoElim(`Crédito ${f} eliminado.`); setTimeout(() => setAvisoElim(null), 6000); }} />}
       {elimDesdeTabla && <ModalConfirmarEliminacion credito={elimDesdeTabla} onClose={() => setElimDesdeTabla(null)} onDeleted={(f) => { setElimDesdeTabla(null); cargar(); setAvisoElim(`Crédito ${f} eliminado.`); setTimeout(() => setAvisoElim(null), 6000); }} />}
     </div>
+  );
+}
+
+// =====================================================================
+// Descargar plantilla Excel
+// =====================================================================
+function descargarPlantilla() {
+  import("xlsx").then((XLSX) => {
+    const headers = [
+      "folio","tipo_producto","acreditado","rfc","fecha_origen","monto","tipo_tasa",
+      "tasa_anual_pct","tasa_referencia","valor_referencia_pct","spread_pp","plazo_meses",
+      "frecuencia","metodo_amort","tipo_garantia","periodo_gracia_meses","tipo_gracia",
+      "valor_bien","enganche","valor_residual","deudor","monto_factura","aforo_pct",
+      "tasa_descuento_pct","comision_pct","fecha_vencimiento",
+    ];
+    const ejemplos = [
+      {
+        folio: "EJEMPLO-CS", tipo_producto: "credito_simple", acreditado: "Empresa Demo SA", rfc: "EDE010101AAA",
+        fecha_origen: "2026-01-15", monto: 500000, tipo_tasa: "fija", tasa_anual_pct: 24, tasa_referencia: "",
+        valor_referencia_pct: "", spread_pp: "", plazo_meses: 12, frecuencia: "mensual", metodo_amort: "frances",
+        tipo_garantia: "quirografaria", periodo_gracia_meses: 0, tipo_gracia: "ninguna",
+        valor_bien: "", enganche: "", valor_residual: "", deudor: "", monto_factura: "", aforo_pct: "",
+        tasa_descuento_pct: "", comision_pct: "", fecha_vencimiento: "",
+      },
+      {
+        folio: "EJEMPLO-AF", tipo_producto: "arrendamiento_financiero", acreditado: "Arrendadora MX",
+        rfc: "AMX020202BBB", fecha_origen: "2026-02-01", monto: "", tipo_tasa: "fija", tasa_anual_pct: 18,
+        tasa_referencia: "", valor_referencia_pct: "", spread_pp: "", plazo_meses: 36, frecuencia: "mensual",
+        metodo_amort: "frances", tipo_garantia: "bien_arrendado", periodo_gracia_meses: 0, tipo_gracia: "ninguna",
+        valor_bien: 800000, enganche: 80000, valor_residual: 8000, deudor: "", monto_factura: "",
+        aforo_pct: "", tasa_descuento_pct: "", comision_pct: "", fecha_vencimiento: "",
+      },
+      {
+        folio: "EJEMPLO-FA", tipo_producto: "factoraje", acreditado: "Cedente SA de CV", rfc: "CSA030303CCC",
+        fecha_origen: "2026-03-01", monto: "", tipo_tasa: "", tasa_anual_pct: "", tasa_referencia: "",
+        valor_referencia_pct: "", spread_pp: "", plazo_meses: "", frecuencia: "", metodo_amort: "",
+        tipo_garantia: "", periodo_gracia_meses: "", tipo_gracia: "", valor_bien: "", enganche: "",
+        valor_residual: "", deudor: "Pagador Industries", monto_factura: 1000000, aforo_pct: 80,
+        tasa_descuento_pct: 24, comision_pct: 2, fecha_vencimiento: "2026-06-01",
+      },
+    ];
+    const ws = XLSX.utils.json_to_sheet(ejemplos, { header: headers });
+    ws["!cols"] = headers.map((h) => ({ wch: Math.max(h.length + 2, 14) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Cartera");
+    XLSX.writeFile(wb, "CapiProm_Machote_Cartera.xlsx");
+  });
+}
+
+// =====================================================================
+// MODAL: Importar cartera desde Excel
+// =====================================================================
+interface FilaImport {
+  idx: number;
+  input: InputOperacion;
+  valida: boolean;
+  error?: string;
+}
+
+function ModalImportar({ isMobile, onClose, onDone }: { isMobile?: boolean; onClose: () => void; onDone: (msg: string) => void }) {
+  const [filas, setFilas] = useState<FilaImport[]>([]);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [importando, setImportando] = useState(false);
+  const [progreso, setProgreso] = useState({ actual: 0, total: 0 });
+  const [resultado, setResultado] = useState<{ ok: number; fail: number; errores: string[] } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const validas = filas.filter((f) => f.valida);
+  const invalidas = filas.filter((f) => !f.valida);
+
+  function parseDateValue(v: any): string {
+    if (!v) return "";
+    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    const s = String(v).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    return s;
+  }
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    setParseError(null);
+    setFilas([]);
+    setResultado(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { cellDates: true });
+      const sheetName = wb.SheetNames.includes("Cartera") ? "Cartera" : wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+      if (rows.length === 0) { setParseError("El archivo no contiene filas de datos."); return; }
+
+      // Normalize headers
+      const normalize = (s: string) => s.trim().toLowerCase().replace(/\s+/g, "_");
+
+      const parsed: FilaImport[] = [];
+      let idx = 0;
+
+      for (const raw of rows) {
+        const row: Record<string, any> = {};
+        for (const [k, v] of Object.entries(raw)) {
+          row[normalize(k)] = v;
+        }
+
+        // Skip example rows and empty rows
+        const folioVal = String(row.folio ?? "").trim().toUpperCase();
+        if (folioVal.includes("EJEMPLO")) continue;
+        const acreditado = String(row.acreditado ?? "").trim();
+        if (!acreditado && !row.monto && !row.monto_factura) continue;
+
+        idx++;
+        const tp = String(row.tipo_producto ?? "credito_simple").trim() as TipoProducto;
+
+        const input: InputOperacion = {
+          tipo_producto: tp,
+          folio: row.folio ? String(row.folio).trim() : undefined,
+          acreditado,
+          rfc: row.rfc ? String(row.rfc).trim() : undefined,
+          fecha_origen: parseDateValue(row.fecha_origen) || new Date().toISOString().slice(0, 10),
+          monto: Number(row.monto) || 0,
+          tipo_tasa: String(row.tipo_tasa || "fija").trim() as "fija" | "variable",
+          tasa_anual_pct: Number(row.tasa_anual_pct) || 0,
+          tasa_referencia: row.tasa_referencia ? String(row.tasa_referencia).trim() : undefined,
+          valor_referencia_pct: Number(row.valor_referencia_pct) || 0,
+          spread_pp: Number(row.spread_pp) || 0,
+          plazo_meses: Number(row.plazo_meses) || 0,
+          frecuencia: (String(row.frecuencia || "mensual").trim() as Frecuencia),
+          metodo_amort: (String(row.metodo_amort || "frances").trim() as MetodoAmort),
+          tipo_garantia: row.tipo_garantia ? String(row.tipo_garantia).trim() : undefined,
+          periodo_gracia_meses: Number(row.periodo_gracia_meses) || 0,
+          tipo_gracia: (String(row.tipo_gracia || "ninguna").trim() as TipoGracia),
+          tipo_disposicion: "unica",
+          valor_bien: Number(row.valor_bien) || 0,
+          enganche: Number(row.enganche) || 0,
+          valor_residual: Number(row.valor_residual) || 0,
+          deudor: row.deudor ? String(row.deudor).trim() : undefined,
+          monto_factura: Number(row.monto_factura) || 0,
+          aforo_pct: Number(row.aforo_pct) || 80,
+          tasa_descuento_pct: Number(row.tasa_descuento_pct) || 0,
+          comision_pct: Number(row.comision_pct) || 0,
+          fecha_vencimiento: parseDateValue(row.fecha_vencimiento) || undefined,
+        };
+
+        // Validate
+        const validTipos: TipoProducto[] = ["credito_simple", "arrendamiento_financiero", "arrendamiento_puro", "factoraje"];
+        if (!validTipos.includes(tp)) {
+          parsed.push({ idx, input, valida: false, error: `tipo_producto inválido: "${tp}"` });
+          continue;
+        }
+        if (!acreditado) {
+          parsed.push({ idx, input, valida: false, error: "acreditado vacío" });
+          continue;
+        }
+        if (!input.fecha_origen || !/^\d{4}-\d{2}-\d{2}$/.test(input.fecha_origen)) {
+          parsed.push({ idx, input, valida: false, error: "fecha_origen inválida" });
+          continue;
+        }
+
+        try {
+          construirOperacion(input);
+          parsed.push({ idx, input, valida: true });
+        } catch (err: any) {
+          parsed.push({ idx, input, valida: false, error: err.message });
+        }
+      }
+
+      if (parsed.length === 0) { setParseError("No se encontraron filas válidas (se omitieron filas de ejemplo y vacías)."); return; }
+      setFilas(parsed);
+    } catch (err: any) {
+      setParseError("Error al leer el archivo: " + err.message);
+    }
+
+    // Reset file input
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  async function importar() {
+    setImportando(true);
+    setResultado(null);
+    const supabase = createClient();
+    const { data: userData } = await supabase.auth.getUser();
+    const operador = userData.user?.email ?? "sistema";
+
+    let ok = 0;
+    let fail = 0;
+    const errores: string[] = [];
+
+    for (let i = 0; i < validas.length; i++) {
+      setProgreso({ actual: i + 1, total: validas.length });
+      const fila = validas[i];
+      try {
+        const { creditoRow, cupones, disposicionMonto } = construirOperacion(fila.input);
+
+        const { data: credito, error: errCred } = await supabase.from("creditos").insert(creditoRow).select().single();
+        if (errCred || !credito) throw new Error(errCred?.message ?? "Error al insertar crédito");
+
+        await supabase.from("disposiciones").insert({ credito_id: credito.id, numero: 1, monto: disposicionMonto, fecha: creditoRow.fecha_origen });
+
+        await supabase.from("amortizacion").insert(cupones.map((c) => ({
+          credito_id: credito.id, numero_cupon: c.numero_cupon, fecha_pago: c.fecha_pago,
+          saldo_inicial: c.saldo_inicial, capital: c.capital, interes: c.interes,
+          pago_total: c.pago_total, saldo_final: c.saldo_final,
+        })));
+
+        await supabase.from("bitacora").insert({
+          entidad: "credito", entidad_id: credito.id, accion: "creado",
+          detalle: { origen: "import", folio: creditoRow.folio, tipo: creditoRow.tipo_producto },
+          usuario: operador,
+        });
+        ok++;
+      } catch (err: any) {
+        fail++;
+        errores.push(`Fila ${fila.idx} (${fila.input.acreditado}): ${err.message}`);
+      }
+    }
+
+    setImportando(false);
+    setResultado({ ok, fail, errores });
+    if (ok > 0 && fail === 0) {
+      setTimeout(() => onDone(`${ok} crédito${ok === 1 ? "" : "s"} importado${ok === 1 ? "" : "s"} exitosamente.`), 1200);
+    }
+  }
+
+  return (
+    <Overlay onClose={importando ? () => {} : onClose} wide>
+      <div style={{ padding: isMobile ? "20px 16px" : "28px 32px", maxHeight: "86vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 600, color: "#0a1628" }}>Importar cartera</h2>
+          {!importando && <button className="btn btn-ghost" onClick={onClose} style={{ padding: "8px 14px" }}>✕</button>}
+        </div>
+
+        {/* File picker */}
+        {filas.length === 0 && !resultado && (
+          <div style={{ border: "2px dashed var(--line)", borderRadius: 10, padding: isMobile ? "32px 16px" : "48px 40px", textAlign: "center" }}>
+            <Upload size={32} strokeWidth={1.5} color="#94a3b8" style={{ margin: "0 auto 12px" }} />
+            <p style={{ fontSize: 14, fontWeight: 500, color: "#475569", marginBottom: 4 }}>Selecciona un archivo .xlsx</p>
+            <p style={{ fontSize: 12.5, color: "var(--text-faint)", marginBottom: 16 }}>Usa la plantilla descargable para llenar la cartera. Las filas de ejemplo se omiten automáticamente.</p>
+            <p style={{ fontSize: 11.5, color: "var(--text-faint)", marginBottom: 16 }}>Todas las filas se importan con disposición única. No se soportan disposiciones múltiples en import.</p>
+            <label className="btn btn-primary" style={{ cursor: "pointer", display: "inline-flex" }}>
+              Seleccionar archivo
+              <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} style={{ display: "none" }} />
+            </label>
+          </div>
+        )}
+
+        {parseError && (
+          <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "12px 16px", borderRadius: 6, fontSize: 13, marginTop: 12 }}>{parseError}</div>
+        )}
+
+        {/* Preview table */}
+        {filas.length > 0 && !resultado && (
+          <>
+            <div style={{ display: "flex", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 13 }}>
+                <span style={{ color: "var(--green)", fontWeight: 600 }}>{validas.length}</span> válida{validas.length === 1 ? "" : "s"}
+              </div>
+              {invalidas.length > 0 && (
+                <div style={{ fontSize: 13 }}>
+                  <span style={{ color: "var(--red)", fontWeight: 600 }}>{invalidas.length}</span> con error
+                </div>
+              )}
+              <div style={{ fontSize: 12, color: "var(--text-faint)" }}>Solo se importarán las filas válidas.</div>
+            </div>
+
+            <div className="panel" style={{ overflow: "hidden", marginBottom: 16 }}>
+              <div style={{ overflowX: "auto" }}>
+                <table className="table" style={{ fontSize: 12.5 }}>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Producto</th>
+                      <th>Acreditado</th>
+                      <th style={{ textAlign: "right" }}>Monto</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filas.map((f) => {
+                      const montoDisplay = f.input.tipo_producto === "factoraje"
+                        ? f.input.monto_factura ?? 0
+                        : (f.input.tipo_producto === "arrendamiento_financiero" || f.input.tipo_producto === "arrendamiento_puro")
+                          ? (f.input.valor_bien ?? 0) - (f.input.enganche ?? 0)
+                          : f.input.monto ?? 0;
+                      return (
+                        <tr key={f.idx} style={{ background: f.valida ? undefined : "rgba(181,72,72,0.04)" }}>
+                          <td className="mono">{f.idx}</td>
+                          <td>
+                            <span className="badge" style={{ background: f.input.tipo_producto === "factoraje" ? "#ede9fe" : f.input.tipo_producto.startsWith("arrendamiento") ? "#e0f2fe" : "#f0f2f5", color: f.input.tipo_producto === "factoraje" ? "#7c3aed" : f.input.tipo_producto.startsWith("arrendamiento") ? "#0284c7" : "#64748b", fontSize: 11 }}>
+                              {TIPO_PRODUCTO_LABEL[f.input.tipo_producto] ?? f.input.tipo_producto}
+                            </span>
+                          </td>
+                          <td>{f.input.acreditado}</td>
+                          <td className="mono" style={{ textAlign: "right" }}>{mxn(montoDisplay)}</td>
+                          <td>
+                            {f.valida
+                              ? <span style={{ color: "var(--green)", fontSize: 12, fontWeight: 500 }}>Válida</span>
+                              : <span style={{ color: "var(--red)", fontSize: 12 }} title={f.error}>{f.error}</span>
+                            }
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Progress bar during import */}
+            {importando && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 6 }}>
+                  Importando {progreso.actual} de {progreso.total}…
+                </div>
+                <div style={{ background: "var(--line-soft)", borderRadius: 4, height: 8, overflow: "hidden" }}>
+                  <div style={{ background: "var(--amber)", height: "100%", borderRadius: 4, width: `${(progreso.actual / progreso.total) * 100}%`, transition: "width 0.3s" }} />
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 12 }}>
+              <button className="btn btn-ghost" onClick={() => { setFilas([]); setParseError(null); }} disabled={importando} style={{ flex: 1 }}>Volver</button>
+              <button className="btn btn-primary" onClick={importar} disabled={importando || validas.length === 0} style={{ flex: 1 }}>
+                {importando ? "Importando…" : `Importar ${validas.length} crédito${validas.length === 1 ? "" : "s"}`}
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Result */}
+        {resultado && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ background: resultado.fail === 0 ? "var(--green-soft)" : "var(--amber-soft)", padding: "16px 20px", borderRadius: 8, marginBottom: 16 }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: resultado.fail === 0 ? "var(--green)" : "var(--amber)" }}>
+                {resultado.ok} importado{resultado.ok === 1 ? "" : "s"}{resultado.fail > 0 ? `, ${resultado.fail} fallido${resultado.fail === 1 ? "" : "s"}` : ""}
+              </div>
+            </div>
+            {resultado.errores.length > 0 && (
+              <div className="panel" style={{ padding: "12px 16px", maxHeight: 200, overflowY: "auto", marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--red)" }}>Errores:</div>
+                {resultado.errores.map((e, i) => (
+                  <div key={i} style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 4 }}>{e}</div>
+                ))}
+              </div>
+            )}
+            <button className="btn btn-primary" onClick={() => onDone(`${resultado.ok} crédito${resultado.ok === 1 ? "" : "s"} importado${resultado.ok === 1 ? "" : "s"}.`)} style={{ width: "100%" }}>Cerrar</button>
+          </div>
+        )}
+      </div>
+    </Overlay>
   );
 }
 
@@ -283,137 +646,79 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
   async function guardar() {
     setError(null);
 
-    // === Validaciones comunes ===
+    // Validación extra de disposiciones múltiples (no manejada por construirOperacion)
     if (!form.acreditado) { setError("Ingresa el acreditado."); return; }
+    if (tipoProducto === "credito_simple" && form.tipo_disposicion === "multiple") {
+      const sumDisp = disposiciones.reduce((s, d) => s + (Number(d.monto) || 0), 0);
+      if (sumDisp > Number(form.monto)) { setError("La suma de disposiciones excede el monto autorizado."); return; }
+    }
 
-    if (esFactoraje) {
-      if (!form.monto_factura || Number(form.monto_factura) <= 0) { setError("Ingresa el monto de la factura."); return; }
-      if (!form.tasa_descuento || Number(form.tasa_descuento) <= 0) { setError("Ingresa la tasa de descuento."); return; }
-      if (!form.fecha_vencimiento) { setError("Ingresa la fecha de vencimiento."); return; }
-      if (!form.deudor) { setError("Ingresa el deudor."); return; }
-      const aforoN = Number(form.aforo) || 0;
-      if (aforoN < 1 || aforoN > 100) { setError("El aforo debe estar entre 1% y 100%."); return; }
-    } else if (esArrendamiento) {
-      if (!form.valor_bien || Number(form.valor_bien) <= 0) { setError("Ingresa el valor del bien."); return; }
-      if (montoFinanciado <= 0) { setError("El monto a financiar debe ser positivo."); return; }
-      if (tasaEfectiva <= 0) { setError("La tasa debe ser mayor a 0."); return; }
-      if (!form.plazo_meses) { setError("Ingresa el plazo."); return; }
-      if (vrNum >= montoFinanciado) { setError("El valor residual debe ser menor al monto financiado."); return; }
-    } else {
-      if (!form.monto) { setError("Ingresa el monto."); return; }
-      if (tasaEfectiva <= 0) { setError("La tasa debe ser mayor a 0."); return; }
-      if (!form.plazo_meses) { setError("Ingresa el plazo."); return; }
-      if (graciaNum >= Number(form.plazo_meses)) { setError("La gracia debe ser menor al plazo."); return; }
-      if (form.tipo_disposicion === "multiple") {
-        const sumDisp = disposiciones.reduce((s, d) => s + (Number(d.monto) || 0), 0);
-        if (sumDisp > Number(form.monto)) { setError("La suma de disposiciones excede el monto autorizado."); return; }
-      }
+    // Construir la operación con la función compartida
+    const input: InputOperacion = {
+      tipo_producto: tipoProducto,
+      acreditado: form.acreditado,
+      rfc: form.rfc || undefined,
+      fecha_origen: form.fecha_origen,
+      monto: Number(form.monto) || 0,
+      tipo_tasa: form.tipo_tasa,
+      tasa_anual_pct: Number(form.tasa_anual) || 0,
+      tasa_referencia: form.tasa_referencia,
+      valor_referencia_pct: Number(form.valor_referencia) || 0,
+      spread_pp: Number(form.spread_pp) || 0,
+      plazo_meses: Number(form.plazo_meses) || 0,
+      frecuencia: form.frecuencia,
+      metodo_amort: form.metodo_amort,
+      crecimiento_pct: Number(form.crecimiento) || 5,
+      tipo_garantia: form.tipo_garantia,
+      periodo_gracia_meses: graciaNum,
+      tipo_gracia: form.tipo_gracia,
+      tipo_disposicion: esArrendamiento ? "unica" : form.tipo_disposicion as "unica" | "multiple",
+      valor_bien: Number(form.valor_bien) || 0,
+      enganche: Number(form.enganche) || 0,
+      valor_residual: Number(form.valor_residual) || 0,
+      deudor: form.deudor || undefined,
+      monto_factura: Number(form.monto_factura) || 0,
+      aforo_pct: Number(form.aforo) || 80,
+      tasa_descuento_pct: Number(form.tasa_descuento) || 0,
+      comision_pct: Number(form.comision_pct) || 0,
+      fecha_vencimiento: form.fecha_vencimiento || undefined,
+    };
+
+    let resultado;
+    try {
+      resultado = construirOperacion(input);
+    } catch (e: any) {
+      setError(e.message);
+      return;
     }
 
     setGuardando(true);
     const supabase = createClient();
     const { data: userData } = await supabase.auth.getUser();
     const operador = userData.user?.email ?? "sistema";
-    const folio = "CP-" + Date.now().toString().slice(-7);
 
-    if (esFactoraje) {
-      // === FACTORAJE ===
-      const desg = calcularFactoraje({
-        montoFactura: Number(form.monto_factura),
-        aforo: Number(form.aforo),
-        tasaDescuento: Number(form.tasa_descuento),
-        comisionPct: Number(form.comision_pct) || 0,
-        fechaOrigen: form.fecha_origen,
-        fechaVencimiento: form.fecha_vencimiento,
-      });
-      const diasFact = desg.dias;
-      const plazoM = Math.max(1, Math.round(diasFact / 30));
+    const { creditoRow, cupones, disposicionMonto } = resultado;
 
-      const { data: credito, error: errCred } = await supabase.from("creditos").insert({
-        folio, acreditado: form.acreditado, rfc: form.rfc || null,
-        tipo_producto: "factoraje",
-        monto: desg.anticipo, tasa_anual: Number(form.tasa_descuento) / 100,
-        plazo_meses: plazoM, frecuencia: "mensual", metodo_amort: "bullet",
-        fecha_origen: form.fecha_origen, estatus: "vigente",
-        tipo_tasa: "fija", tasa_referencia: null, valor_referencia: null, spread_pp: null,
-        tipo_garantia: form.tipo_garantia || "quirografaria",
-        periodo_gracia_meses: 0, tipo_gracia: "ninguna",
-        tipo_disposicion: "unica",
-        deudor: form.deudor, monto_factura: Number(form.monto_factura),
-        aforo: Number(form.aforo), tasa_descuento: Number(form.tasa_descuento),
-        comision_pct: Number(form.comision_pct) || 0,
-        fecha_vencimiento: form.fecha_vencimiento,
-      }).select().single();
+    const { data: credito, error: errCred } = await supabase.from("creditos").insert(creditoRow).select().single();
+    if (errCred || !credito) { setGuardando(false); setError("Error: " + (errCred?.message ?? "")); return; }
 
-      if (errCred || !credito) { setGuardando(false); setError("Error: " + (errCred?.message ?? "")); return; }
-
-      await supabase.from("disposiciones").insert({ credito_id: credito.id, numero: 1, monto: desg.anticipo, fecha: form.fecha_origen });
-
-      // Un cupón único
-      await supabase.from("amortizacion").insert({
-        credito_id: credito.id, numero_cupon: 1, fecha_pago: form.fecha_vencimiento,
-        saldo_inicial: desg.anticipo, capital: desg.anticipo,
-        interes: desg.descuento, pago_total: Number(form.monto_factura),
-        saldo_final: 0,
-      });
-
-      await supabase.from("bitacora").insert({ entidad: "credito", entidad_id: credito.id, accion: "creado", detalle: { folio, tipo: "factoraje", monto_factura: Number(form.monto_factura), anticipo: desg.anticipo }, usuario: operador });
+    // Disposiciones
+    if (tipoProducto === "credito_simple" && form.tipo_disposicion === "multiple" && disposiciones.length > 0) {
+      await supabase.from("disposiciones").insert(
+        disposiciones.map((d, i) => ({ credito_id: credito.id, numero: i + 1, monto: Number(d.monto), fecha: d.fecha }))
+      );
     } else {
-      // === CRÉDITO SIMPLE / ARRENDAMIENTO ===
-      const tasaFinal = tasaEfectiva / 100;
-      const montoGuardar = esArrendamiento ? montoFinanciado : Number(form.monto);
-
-      const insertData: Record<string, any> = {
-        folio, acreditado: form.acreditado, rfc: form.rfc || null,
-        tipo_producto: tipoProducto,
-        monto: montoGuardar, tasa_anual: tasaFinal,
-        plazo_meses: Number(form.plazo_meses), frecuencia: form.frecuencia,
-        metodo_amort: form.metodo_amort, fecha_origen: form.fecha_origen, estatus: "vigente",
-        tipo_tasa: form.tipo_tasa,
-        tasa_referencia: form.tipo_tasa === "variable" ? form.tasa_referencia : null,
-        valor_referencia: form.tipo_tasa === "variable" ? Number(form.valor_referencia) / 100 : null,
-        spread_pp: form.tipo_tasa === "variable" ? Number(form.spread_pp) / 100 : null,
-        tipo_garantia: form.tipo_garantia,
-        periodo_gracia_meses: graciaNum, tipo_gracia: graciaNum > 0 ? form.tipo_gracia : "ninguna",
-        tipo_disposicion: esArrendamiento ? "unica" : form.tipo_disposicion,
-      };
-
-      if (esArrendamiento) {
-        insertData.valor_bien = Number(form.valor_bien);
-        insertData.enganche = Number(form.enganche) || 0;
-        insertData.valor_residual = vrNum;
-      }
-
-      const { data: credito, error: errCred } = await supabase.from("creditos").insert(insertData).select().single();
-      if (errCred || !credito) { setGuardando(false); setError("Error: " + (errCred?.message ?? "")); return; }
-
-      // Disposiciones
-      if (!esArrendamiento && form.tipo_disposicion === "multiple" && disposiciones.length > 0) {
-        await supabase.from("disposiciones").insert(
-          disposiciones.map((d, i) => ({ credito_id: credito.id, numero: i + 1, monto: Number(d.monto), fecha: d.fecha }))
-        );
-      } else {
-        await supabase.from("disposiciones").insert({ credito_id: credito.id, numero: 1, monto: capitalBase, fecha: form.fecha_origen });
-      }
-
-      // Amortización
-      const freq = form.frecuencia as Frecuencia;
-      const tabla = generarTablaAmortizacion({
-        monto: capitalBase, tasaAnual: tasaFinal, plazoMeses: Number(form.plazo_meses), frecuencia: freq,
-        metodo: form.metodo_amort, fechaOrigen: form.fecha_origen,
-        crecimientoPeriodo: form.metodo_amort === "creciente" ? Number(form.crecimiento) / 100 : undefined,
-        graciaPeridos: graciaNum > 0 ? calcularGraciaPeridos(graciaNum, freq) : 0,
-        tipoGracia: graciaNum > 0 ? form.tipo_gracia : "ninguna",
-        valorResidual: vrNum,
-      });
-      await supabase.from("amortizacion").insert(tabla.map((c) => ({
-        credito_id: credito.id, numero_cupon: c.numero_cupon, fecha_pago: c.fecha_pago,
-        saldo_inicial: c.saldo_inicial, capital: c.capital, interes: c.interes,
-        pago_total: c.pago_total, saldo_final: c.saldo_final,
-      })));
-
-      await supabase.from("bitacora").insert({ entidad: "credito", entidad_id: credito.id, accion: "creado", detalle: { folio, tipo: tipoProducto, monto: montoGuardar, cupones: tabla.length }, usuario: operador });
+      await supabase.from("disposiciones").insert({ credito_id: credito.id, numero: 1, monto: disposicionMonto, fecha: form.fecha_origen });
     }
+
+    // Amortización
+    await supabase.from("amortizacion").insert(cupones.map((c) => ({
+      credito_id: credito.id, numero_cupon: c.numero_cupon, fecha_pago: c.fecha_pago,
+      saldo_inicial: c.saldo_inicial, capital: c.capital, interes: c.interes,
+      pago_total: c.pago_total, saldo_final: c.saldo_final,
+    })));
+
+    await supabase.from("bitacora").insert({ entidad: "credito", entidad_id: credito.id, accion: "creado", detalle: { folio: creditoRow.folio, tipo: tipoProducto, monto: creditoRow.monto, cupones: cupones.length }, usuario: operador });
 
     setGuardando(false);
     onSaved();
