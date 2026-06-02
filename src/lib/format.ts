@@ -46,3 +46,24 @@ export const labelEstatus: Record<string, string> = {
   rechazada: "Rechazada",
   convertida: "Convertida",
 };
+
+export const TIPO_PRODUCTO_LABEL: Record<string, string> = {
+  credito_simple: "Crédito",
+  arrendamiento_financiero: "Arr. Fin.",
+  arrendamiento_puro: "Arr. Puro",
+  factoraje: "Factoraje",
+};
+
+export const TIPO_PRODUCTO_FULL: Record<string, string> = {
+  credito_simple: "Crédito Simple",
+  arrendamiento_financiero: "Arrendamiento Financiero",
+  arrendamiento_puro: "Arrendamiento Puro",
+  factoraje: "Factoraje",
+};
+
+export const GARANTIA_LABEL: Record<string, string> = {
+  quirografaria: "Quirografaria",
+  fideicomiso_flujo: "Fideicomiso",
+  derecho_cobro: "Der. cobro",
+  bien_arrendado: "Bien arrendado",
+};

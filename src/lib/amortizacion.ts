@@ -28,6 +28,7 @@ export interface ParamsCredito {
   crecimientoPeriodo?: number; // solo creciente, default 0.05
   graciaPeridos?: number;      // periodos de gracia (convertidos de meses)
   tipoGracia?: TipoGracia;
+  valorResidual?: number;      // arrendamientos: saldo que queda al final (opción de compra)
 }
 
 const PERIODOS_POR_ANIO: Record<Frecuencia, number> = {
@@ -107,16 +108,11 @@ export function generarTablaAmortizacion(p: ParamsCredito): Cupon[] {
   const nAmort = nTotal - nGracia;
   if (nAmort <= 0) return cupones;
 
-  // Generate amortization on remaining balance
-  const amortParams: ParamsCredito = {
-    ...p,
-    monto: saldo,
-    plazoMeses: 0, // not used directly below
-  };
+  const vr = p.valorResidual ?? 0;
 
   let amortCupones: Cupon[];
-  if (p.metodo === "frances") amortCupones = generarFrances(saldo, nAmort, tasaPeriodo);
-  else if (p.metodo === "lineal") amortCupones = generarLineal(saldo, nAmort, tasaPeriodo);
+  if (p.metodo === "frances") amortCupones = generarFrances(saldo, nAmort, tasaPeriodo, vr);
+  else if (p.metodo === "lineal") amortCupones = generarLineal(saldo, nAmort, tasaPeriodo, vr);
   else if (p.metodo === "bullet") amortCupones = generarBullet(saldo, nAmort, tasaPeriodo);
   else amortCupones = generarCreciente(saldo, nAmort, tasaPeriodo, p.crecimientoPeriodo ?? 0.05);
 
@@ -124,6 +120,21 @@ export function generarTablaAmortizacion(p: ParamsCredito): Cupon[] {
   for (const c of amortCupones) {
     c.numero_cupon += nGracia;
     c.fecha_pago = fechaCupon(p.fechaOrigen, p.frecuencia, c.numero_cupon);
+  }
+
+  // Línea extra de opción de compra (valor residual)
+  if (vr > 0) {
+    const lastCupon = amortCupones[amortCupones.length - 1];
+    const nOC = (lastCupon?.numero_cupon ?? nGracia) + 1;
+    amortCupones.push({
+      numero_cupon: nOC,
+      fecha_pago: fechaCupon(p.fechaOrigen, p.frecuencia, nOC),
+      saldo_inicial: rd(vr),
+      capital: rd(vr),
+      interes: 0,
+      pago_total: rd(vr),
+      saldo_final: 0,
+    });
   }
 
   return [...cupones, ...amortCupones];
@@ -137,20 +148,29 @@ export function calcularGraciaPeridos(graciaMeses: number, frecuencia: Frecuenci
 // -----------------------------------------------------------------
 // FRANCÉS: cuota fija (sistema francés)
 // -----------------------------------------------------------------
-function generarFrances(monto: number, n: number, tasaPeriodo: number): Cupon[] {
+function generarFrances(monto: number, n: number, tasaPeriodo: number, valorResidual = 0): Cupon[] {
   const cupones: Cupon[] = [];
+  // Con valor residual: R = (capital - VR·(1+i)^(-n)) / a(n,i)
+  // donde a(n,i) = (1-(1+i)^(-n))/i
+  const vrPV = valorResidual * Math.pow(1 + tasaPeriodo, -n);
+  const montoAmort = monto - vrPV;
   const cuota = tasaPeriodo === 0
-    ? monto / n
-    : (monto * tasaPeriodo) / (1 - Math.pow(1 + tasaPeriodo, -n));
+    ? montoAmort / n
+    : (montoAmort * tasaPeriodo) / (1 - Math.pow(1 + tasaPeriodo, -n));
   let saldo = monto;
 
   for (let i = 1; i <= n; i++) {
     const interes = rd(saldo * tasaPeriodo);
-    let capital = i === n ? rd(saldo) : rd(cuota - interes);
+    let capital: number;
+    if (i === n) {
+      capital = rd(saldo - valorResidual);
+    } else {
+      capital = rd(cuota - interes);
+    }
     const saldoFinal = Math.max(0, rd(saldo - capital));
     cupones.push({
       numero_cupon: i,
-      fecha_pago: "", // caller sets
+      fecha_pago: "",
       saldo_inicial: rd(saldo),
       capital,
       interes,
@@ -165,14 +185,14 @@ function generarFrances(monto: number, n: number, tasaPeriodo: number): Cupon[] 
 // -----------------------------------------------------------------
 // LINEAL: capital constante
 // -----------------------------------------------------------------
-function generarLineal(monto: number, n: number, tasaPeriodo: number): Cupon[] {
+function generarLineal(monto: number, n: number, tasaPeriodo: number, valorResidual = 0): Cupon[] {
   const cupones: Cupon[] = [];
-  const capitalFijo = monto / n;
+  const capitalFijo = (monto - valorResidual) / n;
   let saldo = monto;
 
   for (let i = 1; i <= n; i++) {
     const interes = rd(saldo * tasaPeriodo);
-    const capital = i === n ? rd(saldo) : rd(capitalFijo);
+    const capital = i === n ? rd(saldo - valorResidual) : rd(capitalFijo);
     const saldoFinal = Math.max(0, rd(saldo - capital));
     cupones.push({
       numero_cupon: i,
