@@ -12,6 +12,7 @@ import {
 import { useRol } from "@/lib/useRol";
 import { esSoloLectura, puedeEliminar, puedeEliminarDesdeTabla, type Rol } from "@/lib/rbac";
 import { Trash2 } from "lucide-react";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 interface Credito {
   id: string;
@@ -28,6 +29,7 @@ interface Credito {
 }
 
 export default function Cartera() {
+  const isMobile = useIsMobile();
   const rol = useRol();
   const readOnly = rol ? esSoloLectura(rol) : false;
   const [creditos, setCreditos] = useState<Credito[]>([]);
@@ -54,15 +56,15 @@ export default function Cartera() {
   }, [cargar]);
 
   return (
-    <div style={{ padding: "36px 40px 60px", maxWidth: 1200 }}>
+    <div style={{ padding: isMobile ? "20px 16px 40px" : "36px 40px 60px", maxWidth: 1200 }}>
       <header
         style={{
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "flex-end",
-          marginBottom: 28,
+          alignItems: isMobile ? "flex-start" : "flex-end",
+          marginBottom: isMobile ? 20 : 28,
           flexWrap: "wrap",
-          gap: 16,
+          gap: 12,
         }}
       >
         <div>
@@ -107,7 +109,8 @@ export default function Cartera() {
             )}
           </div>
         ) : (
-          <table className="table">
+          <div style={{ overflowX: "auto" }}>
+          <table className="table" style={{ minWidth: 700 }}>
             <thead>
               <tr>
                 <th>Folio</th>
@@ -167,11 +170,13 @@ export default function Cartera() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
       {mostrarAlta && (
         <ModalAlta
+          isMobile={isMobile}
           onClose={() => setMostrarAlta(false)}
           onSaved={() => {
             setMostrarAlta(false);
@@ -184,6 +189,7 @@ export default function Cartera() {
         <ModalDetalle
           credito={detalle}
           rol={rol}
+          isMobile={isMobile}
           onClose={() => setDetalle(null)}
           onChanged={() => {
             cargar();
@@ -216,7 +222,7 @@ export default function Cartera() {
 // =====================================================================
 // MODAL: Alta / Originación de crédito
 // =====================================================================
-function ModalAlta({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSaved: () => void; isMobile?: boolean }) {
   const [form, setForm] = useState({
     acreditado: "",
     rfc: "",
@@ -328,9 +334,9 @@ function ModalAlta({ onClose, onSaved }: { onClose: () => void; onSaved: () => v
 
   return (
     <Overlay onClose={onClose}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 0 }}>
         {/* Formulario */}
-        <div style={{ padding: "30px 30px", borderRight: "1px solid var(--line)" }}>
+        <div style={{ padding: isMobile ? "24px 20px" : "30px 30px", borderRight: isMobile ? "none" : "1px solid var(--line)" }}>
           <h2 style={{ fontSize: 20, fontWeight: 600, color: "#0a1628", marginBottom: 22 }}>
             Originar crédito
           </h2>
@@ -464,12 +470,14 @@ function ModalAlta({ onClose, onSaved }: { onClose: () => void; onSaved: () => v
 function ModalDetalle({
   credito,
   rol,
+  isMobile,
   onClose,
   onChanged,
   onDeleted,
 }: {
   credito: Credito;
   rol: Rol | null;
+  isMobile?: boolean;
   onClose: () => void;
   onChanged: () => void;
   onDeleted: (folio: string) => void;
@@ -588,7 +596,7 @@ function ModalDetalle({
           </button>
         </div>}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 24 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.4fr 1fr", gap: isMobile ? 16 : 24 }}>
           {/* Amortización */}
           <div>
             <h3 style={{ fontSize: 16, fontWeight: 600, color: "#0a1628", marginBottom: 12 }}>Tabla de amortización</h3>
@@ -886,7 +894,8 @@ function Overlay({ children, onClose, wide }: { children: React.ReactNode; onClo
         display: "grid",
         placeItems: "center",
         zIndex: 100,
-        padding: 24,
+        padding: "24px max(8px, env(safe-area-inset-left))",
+        overflowY: "auto",
       }}
     >
       <div
@@ -897,6 +906,8 @@ function Overlay({ children, onClose, wide }: { children: React.ReactNode; onClo
           maxWidth: wide ? 940 : 760,
           boxShadow: "var(--shadow-md)",
           overflow: "hidden",
+          maxHeight: "95vh",
+          overflowY: "auto",
         }}
       >
         {children}

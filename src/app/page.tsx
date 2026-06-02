@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase-client";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 type Paso = "credenciales" | "verificar";
 
@@ -11,6 +12,7 @@ const NOISE_SVG = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='h
 
 export default function Acceso() {
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [paso, setPaso] = useState<Paso>("credenciales");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -132,7 +134,7 @@ export default function Acceso() {
         <div
           className="login-fade-2"
           style={{
-            padding: "44px 40px 36px",
+            padding: isMobile ? "28px 22px 24px" : "44px 40px 36px",
             background: "rgba(15,31,58,0.55)",
             backdropFilter: "blur(24px)",
             WebkitBackdropFilter: "blur(24px)",
@@ -158,6 +160,7 @@ export default function Acceso() {
               error={error}
               cargando={cargando}
               shakeKey={shakeKey}
+              isMobile={isMobile}
               onSubmit={verificarTotp}
               onBack={() => {
                 setPaso("credenciales");
@@ -292,11 +295,13 @@ function TOTPForm({
   error,
   cargando,
   shakeKey,
+  isMobile,
   onSubmit,
   onBack,
 }: {
   error: string | null;
   cargando: boolean;
+  isMobile?: boolean;
   shakeKey: number;
   onSubmit: (code: string) => void;
   onBack: () => void;
@@ -330,6 +335,7 @@ function TOTPForm({
         onComplete={onSubmit}
         shakeKey={shakeKey}
         disabled={cargando}
+        compact={isMobile}
       />
 
       {error && (
@@ -395,10 +401,12 @@ function TOTPBoxes({
   onComplete,
   shakeKey,
   disabled,
+  compact,
 }: {
   onComplete: (code: string) => void;
   shakeKey: number;
   disabled: boolean;
+  compact?: boolean;
 }) {
   const [digits, setDigits] = useState<string[]>(Array(6).fill(""));
   const refs = useRef<(HTMLInputElement | null)[]>([]);
@@ -464,7 +472,7 @@ function TOTPBoxes({
     <div
       key={shakeKey}
       className={shakeKey > 0 ? "login-shake" : undefined}
-      style={{ display: "flex", gap: 10, justifyContent: "center" }}
+      style={{ display: "flex", gap: compact ? 6 : 10, justifyContent: "center" }}
     >
       {digits.map((d, i) => (
         <input
@@ -482,8 +490,8 @@ function TOTPBoxes({
           disabled={disabled}
           aria-label={`Dígito ${i + 1}`}
           style={{
-            width: 52,
-            height: 62,
+            width: compact ? 42 : 52,
+            height: compact ? 52 : 62,
             textAlign: "center",
             fontSize: 26,
             fontFamily: "var(--font-display)",

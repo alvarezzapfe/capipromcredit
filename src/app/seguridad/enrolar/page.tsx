@@ -3,11 +3,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 const NOISE_SVG = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E")`;
 
 export default function EnrolarTOTP() {
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [qr, setQr] = useState<string | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -109,7 +111,7 @@ export default function EnrolarTOTP() {
         <div
           className="login-fade-2"
           style={{
-            padding: "44px 40px 36px",
+            padding: isMobile ? "28px 22px 24px" : "44px 40px 36px",
             background: "rgba(15,31,58,0.55)",
             backdropFilter: "blur(24px)",
             WebkitBackdropFilter: "blur(24px)",
@@ -219,6 +221,7 @@ export default function EnrolarTOTP() {
                   onComplete={confirmar}
                   shakeKey={shakeKey}
                   disabled={cargando}
+                  compact={isMobile}
                 />
 
                 {error && (
@@ -281,10 +284,12 @@ function TOTPBoxes({
   onComplete,
   shakeKey,
   disabled,
+  compact,
 }: {
   onComplete: (code: string) => void;
   shakeKey: number;
   disabled: boolean;
+  compact?: boolean;
 }) {
   const [digits, setDigits] = useState<string[]>(Array(6).fill(""));
   const refs = useRef<(HTMLInputElement | null)[]>([]);
@@ -342,7 +347,7 @@ function TOTPBoxes({
     <div
       key={shakeKey}
       className={shakeKey > 0 ? "login-shake" : undefined}
-      style={{ display: "flex", gap: 10, justifyContent: "center" }}
+      style={{ display: "flex", gap: compact ? 6 : 10, justifyContent: "center" }}
     >
       {digits.map((d, i) => (
         <input
@@ -360,8 +365,8 @@ function TOTPBoxes({
           disabled={disabled}
           aria-label={`Dígito ${i + 1}`}
           style={{
-            width: 52,
-            height: 62,
+            width: compact ? 42 : 52,
+            height: compact ? 52 : 62,
             textAlign: "center",
             fontSize: 26,
             fontFamily: "var(--font-display)",

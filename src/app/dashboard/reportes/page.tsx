@@ -18,6 +18,7 @@ import {
   diasVencido, agruparOriginacionPorMes,
   proyectarSaldoMensual, topAcreditados, proximoCupon,
 } from "@/lib/reportes";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 const METODOS = ["lineal", "bullet", "creciente"] as const;
 const PIE_COLORS: Record<string, string> = {
@@ -30,6 +31,7 @@ const hoyStr = () => format(new Date(), "yyyy-MM-dd");
 // Main
 // ================================================================
 export default function Reportes() {
+  const isMobile = useIsMobile();
   const rol = useRol();
   const readOnly = rol ? esSoloLectura(rol) : false;
   const canExport = rol ? puedeCrear(rol) : false;
@@ -204,7 +206,7 @@ export default function Reportes() {
   });
 
   return (
-    <div style={{ padding: "36px 40px 60px", maxWidth: 1280 }}>
+    <div style={{ padding: isMobile ? "20px 16px 40px" : "36px 40px 60px", maxWidth: 1280 }}>
       {/* Header */}
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
         <div>
@@ -231,7 +233,7 @@ export default function Reportes() {
 
       {/* Filters */}
       <div className="panel" style={{ padding: 20, marginBottom: 24 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
           <div className="field">
             <label>Desde</label>
             <input className="input" type="date" value={desde} onChange={(e) => setDesde(e.target.value)} disabled={readOnly} />
@@ -267,7 +269,7 @@ export default function Reportes() {
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 2fr", gap: 12, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 2fr", gap: 12, marginTop: 14 }}>
           <div className="field">
             <label>Monto mín</label>
             <input className="input mono" type="number" placeholder="0" value={montoMin} onChange={(e) => setMontoMin(e.target.value)} disabled={readOnly} />
@@ -291,7 +293,7 @@ export default function Reportes() {
       </div>
 
       {/* KPIs */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: isMobile ? 10 : 16, marginBottom: 24 }}>
         <KpiCard label="Saldo insoluto total" valor={mxn(kpis.saldoInsoluto)} sub={`${filtrados.length} créditos`} />
         <KpiCard label="Interés devengado" valor={mxn(kpis.interesDevengado)} sub={`Del ${desde} al ${hasta}`} />
         <KpiCard label="Por cobrar · 30 días" valor={mxn(kpis.porCobrar30)} sub={`${kpis.cupones30} cupones`} />
@@ -299,7 +301,7 @@ export default function Reportes() {
       </div>
 
       {/* Charts 2x2 */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16, marginBottom: 24 }}>
         <div className="panel" style={{ padding: 20 }}>
           <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: "var(--text)" }}>Distribución por estatus</h3>
           <ResponsiveContainer width="100%" height={220}>
@@ -369,7 +371,8 @@ export default function Reportes() {
           </div>
         ) : (
           <>
-            <table className="table">
+            <div style={{ overflowX: "auto" }}>
+            <table className="table" style={{ minWidth: 700 }}>
               <thead>
                 <tr>
                   {[["folio", "Folio"], ["acreditado", "Acreditado"], ["monto", "Monto"], ["tasa_anual", "Tasa"], ["estatus", "Estatus"]].map(([k, l]) => (
@@ -402,6 +405,7 @@ export default function Reportes() {
                 })}
               </tbody>
             </table>
+            </div>
             {totalPages > 1 && (
               <div style={{ padding: "14px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--line-soft)", fontSize: 13 }}>
                 <button className="btn btn-ghost" disabled={page === 0} onClick={() => setPage(page - 1)} style={{ padding: "6px 14px", fontSize: 12.5 }}>Anterior</button>

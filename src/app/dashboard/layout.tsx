@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase-server";
 import { getPerfil } from "@/lib/perfil";
 import Sidebar from "@/components/Sidebar";
+import { DashboardShell } from "@/components/DashboardShell";
 
 export default async function DashboardLayout({
   children,
@@ -23,11 +24,10 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      <Sidebar email={perfil!.email} rol={perfil!.rol} />
-      <div style={{ flex: 1, minWidth: 0, background: "#fafbfc" }}>
-        {children}
-      </div>
-    </div>
+    <DashboardShell
+      sidebar={<Sidebar email={perfil!.email} rol={perfil!.rol} />}
+    >
+      {children}
+    </DashboardShell>
   );
 }

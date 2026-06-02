@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-client";
 import { mxn, fecha } from "@/lib/format";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 interface CuponView {
   id: string;
@@ -17,6 +18,7 @@ interface CuponView {
 }
 
 export default function Resumen() {
+  const isMobile = useIsMobile();
   const [cargando, setCargando] = useState(true);
   const [kpis, setKpis] = useState({
     creditosActivos: 0,
@@ -71,7 +73,7 @@ export default function Resumen() {
   }, []);
 
   return (
-    <div style={{ padding: "36px 40px 60px", maxWidth: 1200 }}>
+    <div style={{ padding: isMobile ? "20px 16px 40px" : "36px 40px 60px", maxWidth: 1200 }}>
       <header style={{ marginBottom: 32 }}>
         <h1 className="display" style={{ fontSize: 32, marginBottom: 6 }}>
           Resumen de cartera
@@ -85,7 +87,7 @@ export default function Resumen() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
+          gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)",
           gap: 16,
           marginBottom: 32,
         }}
@@ -154,6 +156,7 @@ export default function Resumen() {
             </div>
           </div>
         ) : (
+          <div style={{ overflowX: "auto" }}>
           <table className="table">
             <thead>
               <tr>
@@ -180,6 +183,7 @@ export default function Resumen() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

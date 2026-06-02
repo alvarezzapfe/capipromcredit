@@ -6,6 +6,7 @@ import { mxn, labelEstatus, ESTATUS_SOLICITUD } from "@/lib/format";
 import { Inbox, Plus } from "lucide-react";
 import { useRol } from "@/lib/useRol";
 import { esSoloLectura } from "@/lib/rbac";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 interface Solicitud {
   id: string;
@@ -23,6 +24,7 @@ interface Solicitud {
 const formVacio = { nombre: "", email: "", telefono: "", rfc: "", monto_solicitado: "", plazo_meses: "", destino: "" };
 
 export default function Solicitudes() {
+  const isMobile = useIsMobile();
   const rol = useRol();
   const readOnly = rol ? esSoloLectura(rol) : false;
   const [solicitudes, setSolicitudes] = useState<Solicitud[]>([]);
@@ -113,7 +115,7 @@ export default function Solicitudes() {
       : solicitudes.filter((s) => s.estatus === filtro);
 
   return (
-    <div style={{ padding: "36px 40px 60px", maxWidth: 1200 }}>
+    <div style={{ padding: isMobile ? "20px 16px 40px" : "36px 40px 60px", maxWidth: 1200 }}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
         <div>
           <h1 className="display" style={{ fontSize: 32, marginBottom: 6 }}>Solicitudes</h1>
@@ -190,7 +192,8 @@ export default function Solicitudes() {
             )}
           </div>
         ) : (
-          <table className="table">
+          <div style={{ overflowX: "auto" }}>
+          <table className="table" style={{ minWidth: 700 }}>
             <thead>
               <tr>
                 <th>Solicitante</th>
@@ -239,6 +242,7 @@ export default function Solicitudes() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -252,13 +256,13 @@ export default function Solicitudes() {
           onClick={() => setModal(false)}
           style={{
             position: "fixed", inset: 0, background: "rgba(10,22,40,0.4)", backdropFilter: "blur(6px)",
-            display: "grid", placeItems: "center", zIndex: 100,
+            display: "grid", placeItems: "center", zIndex: 100, overflowY: "auto",
           }}
         >
           <div
             className="panel"
             onClick={(e) => e.stopPropagation()}
-            style={{ width: "100%", maxWidth: 500, padding: "36px 34px" }}
+            style={{ width: "100%", maxWidth: 500, padding: isMobile ? "24px 20px" : "36px 34px" }}
           >
             <h2 style={{ fontSize: 20, fontWeight: 600, color: "#0a1628", marginBottom: 6 }}>
               Nueva solicitud

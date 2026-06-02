@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase-client";
 import { mxn, fecha } from "@/lib/format";
 import { CalendarClock } from "lucide-react";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 interface Cupon {
   id: string;
@@ -19,6 +20,7 @@ interface Cupon {
 }
 
 export default function Flujos() {
+  const isMobile = useIsMobile();
   const [cupones, setCupones] = useState<Cupon[]>([]);
   const [cargando, setCargando] = useState(true);
   const [filtro, setFiltro] = useState<"todos" | "vencidos" | "semana" | "mes">("todos");
@@ -50,7 +52,7 @@ export default function Flujos() {
   const totalMes = cupones.filter((c) => c.dias_al_cupon >= 0 && c.dias_al_cupon <= 30).reduce((s, c) => s + Number(c.pago_total), 0);
 
   return (
-    <div style={{ padding: "36px 40px 60px", maxWidth: 1200 }}>
+    <div style={{ padding: isMobile ? "20px 16px 40px" : "36px 40px 60px", maxWidth: 1200 }}>
       <header style={{ marginBottom: 24 }}>
         <h1 className="display" style={{ fontSize: 32, marginBottom: 6 }}>Flujos y cobranza</h1>
         <p style={{ color: "var(--text-dim)", marginTop: 4 }}>
@@ -80,7 +82,8 @@ export default function Flujos() {
             </p>
           </div>
         ) : (
-          <table className="table">
+          <div style={{ overflowX: "auto" }}>
+          <table className="table" style={{ minWidth: 650 }}>
             <thead>
               <tr>
                 <th>Vence</th>
@@ -106,6 +109,7 @@ export default function Flujos() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

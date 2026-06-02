@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase-client";
 import { Users, Plus, Trash2, KeyRound, RotateCcw, Copy, Mail, Eye } from "lucide-react";
 import { etiquetaRol, ROLES, type Rol } from "@/lib/rbac";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 interface PerfilRow {
   id: string;
@@ -16,6 +17,7 @@ interface PerfilRow {
 }
 
 export default function UsuariosPage() {
+  const isMobile = useIsMobile();
   const [perfiles, setPerfiles] = useState<PerfilRow[]>([]);
   const [cargando, setCargando] = useState(true);
   const [yo, setYo] = useState<string | null>(null);
@@ -88,7 +90,7 @@ export default function UsuariosPage() {
   }
 
   return (
-    <div style={{ padding: "36px 40px 60px", maxWidth: 1100 }}>
+    <div style={{ padding: isMobile ? "20px 16px 40px" : "36px 40px 60px", maxWidth: 1100 }}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
         <div>
           <h1 className="display" style={{ fontSize: 32, marginBottom: 6 }}>Usuarios</h1>
@@ -120,7 +122,8 @@ export default function UsuariosPage() {
             <h3 style={{ fontSize: 14, fontWeight: 600, color: "#475569", marginTop: 14 }}>Sin usuarios</h3>
           </div>
         ) : (
-          <table className="table">
+          <div style={{ overflowX: "auto" }}>
+          <table className="table" style={{ minWidth: 600 }}>
             <thead>
               <tr>
                 <th>Correo</th>
@@ -211,6 +214,7 @@ export default function UsuariosPage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
