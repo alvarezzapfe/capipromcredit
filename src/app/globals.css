@@ -93,8 +93,10 @@ textarea {
 }
 
 .mono {
-  font-family: var(--font-mono);
+  font-family: "IBM Plex Sans", var(--font-body);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum", "zero";
+  letter-spacing: 0.01em;
 }
 
 .dim {

@@ -115,7 +115,7 @@ export default function Solicitudes() {
       : solicitudes.filter((s) => s.estatus === filtro);
 
   return (
-    <div style={{ padding: isMobile ? "20px 16px 40px" : "36px 40px 60px", maxWidth: 1200 }}>
+    <div style={{ padding: isMobile ? "20px 16px 40px" : "32px 48px 60px" }}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
         <div>
           <h1 className="display" style={{ fontSize: 32, marginBottom: 6 }}>Solicitudes</h1>

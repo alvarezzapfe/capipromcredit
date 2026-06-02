@@ -206,7 +206,7 @@ export default function Reportes() {
   });
 
   return (
-    <div style={{ padding: isMobile ? "20px 16px 40px" : "36px 40px 60px", maxWidth: 1280 }}>
+    <div style={{ padding: isMobile ? "20px 16px 40px" : "32px 48px 60px" }}>
       {/* Header */}
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
         <div>

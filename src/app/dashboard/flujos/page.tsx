@@ -52,7 +52,7 @@ export default function Flujos() {
   const totalMes = cupones.filter((c) => c.dias_al_cupon >= 0 && c.dias_al_cupon <= 30).reduce((s, c) => s + Number(c.pago_total), 0);
 
   return (
-    <div style={{ padding: isMobile ? "20px 16px 40px" : "36px 40px 60px", maxWidth: 1200 }}>
+    <div style={{ padding: isMobile ? "20px 16px 40px" : "32px 48px 60px" }}>
       <header style={{ marginBottom: 24 }}>
         <h1 className="display" style={{ fontSize: 32, marginBottom: 6 }}>Flujos y cobranza</h1>
         <p style={{ color: "var(--text-dim)", marginTop: 4 }}>

@@ -123,7 +123,7 @@ export default function Resumen() {
   const gap = m ? 16 : 24;
 
   return (
-    <div style={{ padding: m ? "20px 16px 40px" : "36px 40px 60px", maxWidth: 1200 }}>
+    <div style={{ padding: m ? "20px 16px 40px" : "32px 48px 60px" }}>
       {/* Header */}
       <header style={{ marginBottom: m ? 18 : 28 }}>
         <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 500, letterSpacing: "-0.02em", fontSize: m ? 22 : 30, color: "#0a1628", marginBottom: 4 }}>

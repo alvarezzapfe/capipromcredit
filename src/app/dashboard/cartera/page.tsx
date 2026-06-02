@@ -96,7 +96,7 @@ export default function Cartera() {
   useEffect(() => { cargar(); }, [cargar]);
 
   return (
-    <div style={{ padding: isMobile ? "20px 16px 40px" : "36px 40px 60px", maxWidth: 1200 }}>
+    <div style={{ padding: isMobile ? "20px 16px 40px" : "32px 48px 60px" }}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: isMobile ? "flex-start" : "flex-end", marginBottom: isMobile ? 20 : 28, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h1 className="display" style={{ fontSize: 32, marginBottom: 6 }}>Cartera de crédito</h1>
