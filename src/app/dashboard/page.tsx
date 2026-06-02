@@ -74,11 +74,11 @@ export default function Resumen() {
 
   return (
     <div style={{ padding: isMobile ? "20px 16px 40px" : "36px 40px 60px", maxWidth: 1200 }}>
-      <header style={{ marginBottom: 32 }}>
-        <h1 className="display" style={{ fontSize: 32, marginBottom: 6 }}>
+      <header style={{ marginBottom: isMobile ? 18 : 32 }}>
+        <h1 className="display" style={{ fontSize: isMobile ? 22 : 32, marginBottom: 6 }}>
           Resumen de cartera
         </h1>
-        <p style={{ color: "#5b6b80", fontSize: 14 }}>
+        <p style={{ color: "#5b6b80", fontSize: isMobile ? 13 : 14 }}>
           Vista general de tu operación de crédito.
         </p>
       </header>
@@ -88,14 +88,14 @@ export default function Resumen() {
         style={{
           display: "grid",
           gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)",
-          gap: 16,
-          marginBottom: 32,
+          gap: isMobile ? 10 : 16,
+          marginBottom: isMobile ? 20 : 32,
         }}
       >
-        <Kpi label="Créditos activos" cargando={cargando} valor={String(kpis.creditosActivos)} esMonto={false} />
-        <Kpi label="Saldo insoluto total" cargando={cargando} valor={mxn(kpis.saldoTotal)} esMonto />
-        <Kpi label="Por cobrar · 30 días" cargando={cargando} valor={mxn(kpis.porCobrar30)} esMonto />
-        <Kpi label="Solicitudes nuevas" cargando={cargando} valor={String(kpis.solicitudesNuevas)} esMonto={false} />
+        <Kpi label="Créditos activos" cargando={cargando} valor={String(kpis.creditosActivos)} compact={isMobile} />
+        <Kpi label="Saldo insoluto total" cargando={cargando} valor={mxn(kpis.saldoTotal)} compact={isMobile} />
+        <Kpi label="Por cobrar · 30 días" cargando={cargando} valor={mxn(kpis.porCobrar30)} compact={isMobile} />
+        <Kpi label="Solicitudes nuevas" cargando={cargando} valor={String(kpis.solicitudesNuevas)} compact={isMobile} />
       </div>
 
       {/* Próximos cupones */}
@@ -117,7 +117,7 @@ export default function Resumen() {
             borderBottom: "1px solid #e4e8ee",
           }}
         >
-          <h2 style={{ fontSize: 16, fontWeight: 600, color: "#0a1628", fontFamily: "var(--font-body)" }}>
+          <h2 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 600, color: "#0a1628", fontFamily: "var(--font-body)" }}>
             Próximos cupones por cobrar
           </h2>
           <Link
@@ -190,36 +190,36 @@ export default function Resumen() {
   );
 }
 
-function Kpi({ label, cargando, valor, esMonto }: { label: string; cargando: boolean; valor: string; esMonto: boolean }) {
+function Kpi({ label, cargando, valor, compact }: { label: string; cargando: boolean; valor: string; compact?: boolean }) {
   return (
     <div
       style={{
         background: "#ffffff",
         border: "1px solid #e4e8ee",
         borderRadius: 10,
-        padding: "22px 24px",
+        padding: compact ? "14px 14px" : "22px 24px",
         boxShadow: "0 1px 2px rgba(10,22,40,0.04), 0 0 0 1px rgba(10,22,40,0.02) inset",
       }}
     >
       <div
         style={{
-          fontSize: 11,
+          fontSize: compact ? 10 : 11,
           fontWeight: 600,
           textTransform: "uppercase",
           letterSpacing: "0.06em",
           color: "#94a3b8",
-          marginBottom: 12,
+          marginBottom: compact ? 8 : 12,
         }}
       >
         {label}
       </div>
       {cargando ? (
-        <div className="skeleton" style={{ width: 80, height: 24 }} />
+        <div className="skeleton" style={{ width: 80, height: compact ? 18 : 24 }} />
       ) : (
         <div
           className="mono"
           style={{
-            fontSize: 30,
+            fontSize: compact ? 19 : 30,
             fontWeight: 600,
             color: "#0a1628",
             lineHeight: 1.1,
