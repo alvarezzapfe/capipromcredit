@@ -42,11 +42,26 @@ function rd(n: number): number {
 }
 
 function fechaCupon(origen: string, frecuencia: Frecuencia, periodo: number): string {
-  const d = new Date(origen + "T00:00:00");
-  if (frecuencia === "mensual") d.setMonth(d.getMonth() + periodo);
-  else if (frecuencia === "quincenal") d.setDate(d.getDate() + 15 * periodo);
-  else d.setDate(d.getDate() + 7 * periodo);
-  return d.toISOString().slice(0, 10);
+  // Parse components without timezone issues
+  const [yO, mO, dO] = origen.split("-").map(Number);
+
+  if (frecuencia === "mensual") {
+    // Anchor to original day, clamped to last day of target month
+    const totalMonths = (yO * 12 + (mO - 1)) + periodo;
+    const y = Math.floor(totalMonths / 12);
+    const m = (totalMonths % 12) + 1; // 1-based
+    const maxDay = new Date(y, m, 0).getDate(); // last day of month
+    const d = Math.min(dO, maxDay);
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+
+  // Quincenal / semanal: add days
+  const days = frecuencia === "quincenal" ? 15 * periodo : 7 * periodo;
+  const base = new Date(yO, mO - 1, dO + days);
+  const yy = base.getFullYear();
+  const mm = base.getMonth() + 1;
+  const dd = base.getDate();
+  return `${yy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
 }
 
 function numeroCupones(plazoMeses: number, frecuencia: Frecuencia): number {

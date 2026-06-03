@@ -543,9 +543,34 @@ function ModalImportar({ isMobile, onClose, onDone }: { isMobile?: boolean; onCl
 }
 
 // =====================================================================
-// MODAL: Alta / Originar crédito — 3 secciones
+// MODAL: Alta / Originar crédito — Wizard 3 pasos
 // =====================================================================
+const STEPS = ["Producto", "Condiciones", "Revisar"] as const;
+
+function StepIndicator({ current, isMobile }: { current: number; isMobile?: boolean }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 4 : 8, marginBottom: isMobile ? 16 : 20 }}>
+      {STEPS.map((label, i) => {
+        const done = i < current;
+        const active = i === current;
+        return (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: isMobile ? 4 : 8, flex: i < STEPS.length - 1 ? 1 : undefined }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ width: isMobile ? 22 : 26, height: isMobile ? 22 : 26, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: isMobile ? 11 : 12, fontWeight: 600, background: active ? "var(--amber)" : done ? "#0a1628" : "var(--line-soft)", color: active || done ? "#fff" : "var(--text-faint)", transition: "all 0.2s" }}>
+                {done ? "✓" : i + 1}
+              </div>
+              {!isMobile && <span style={{ fontSize: 12.5, fontWeight: active ? 600 : 400, color: active ? "#0a1628" : "var(--text-dim)" }}>{label}</span>}
+            </div>
+            {i < STEPS.length - 1 && <div style={{ flex: 1, height: 1, background: done ? "#0a1628" : "var(--line)", minWidth: isMobile ? 16 : 24 }} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSaved: () => void; isMobile?: boolean }) {
+  const [step, setStep] = useState(0);
   const [tipoProducto, setTipoProducto] = useState<TipoProducto>("credito_simple");
   const esArrendamiento = tipoProducto === "arrendamiento_financiero" || tipoProducto === "arrendamiento_puro";
   const esFactoraje = tipoProducto === "factoraje";
@@ -561,9 +586,7 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
     periodo_gracia_meses: "0", tipo_gracia: "ninguna" as TipoGracia,
     tipo_disposicion: "unica" as "unica" | "multiple",
     fecha_origen: new Date().toISOString().slice(0, 10),
-    // Arrendamiento
     valor_bien: "", enganche: "", valor_residual: "",
-    // Factoraje
     deudor: "", monto_factura: "", aforo: "80", tasa_descuento: "", comision_pct: "2",
     fecha_vencimiento: "",
   });
@@ -573,7 +596,6 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  // When switching product type, reset guarantee
   function cambiarProducto(tp: TipoProducto) {
     setTipoProducto(tp);
     if (tp === "arrendamiento_financiero" || tp === "arrendamiento_puro") {
@@ -585,141 +607,108 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
     setError(null);
   }
 
-  // Effective rate for variable
   const tasaEfectiva = form.tipo_tasa === "variable"
     ? (Number(form.valor_referencia) || 0) + (Number(form.spread_pp) || 0)
     : Number(form.tasa_anual) || 0;
-
   const graciaNum = Number(form.periodo_gracia_meses) || 0;
-
-  // Capital base depends on product type
-  const montoFinanciado = esArrendamiento
-    ? (Number(form.valor_bien) || 0) - (Number(form.enganche) || 0)
-    : 0;
-
-  const capitalBase = esArrendamiento
-    ? montoFinanciado
+  const montoFinanciado = esArrendamiento ? (Number(form.valor_bien) || 0) - (Number(form.enganche) || 0) : 0;
+  const capitalBase = esArrendamiento ? montoFinanciado
     : form.tipo_disposicion === "multiple" && disposiciones.length > 0
       ? disposiciones.reduce((s, d) => s + (Number(d.monto) || 0), 0)
       : Number(form.monto) || 0;
-
   const vrNum = esArrendamiento ? (Number(form.valor_residual) || 0) : 0;
 
-  // Preview amortización (crédito simple / arrendamiento)
+  // Preview
   const puedePrevisualizar = !esFactoraje && capitalBase > 0 && tasaEfectiva > 0 && Number(form.plazo_meses) > 0;
   let preview: ReturnType<typeof generarTablaAmortizacion> = [];
   let previewErr: string | null = null;
   if (puedePrevisualizar) {
     try {
       const freq = form.frecuencia as Frecuencia;
-      preview = generarTablaAmortizacion({
-        monto: capitalBase,
-        tasaAnual: tasaEfectiva / 100,
-        plazoMeses: Number(form.plazo_meses),
-        frecuencia: freq,
-        metodo: form.metodo_amort,
-        fechaOrigen: form.fecha_origen,
-        crecimientoPeriodo: form.metodo_amort === "creciente" ? Number(form.crecimiento) / 100 : undefined,
-        graciaPeridos: graciaNum > 0 ? calcularGraciaPeridos(graciaNum, freq) : 0,
-        tipoGracia: graciaNum > 0 ? form.tipo_gracia : "ninguna",
-        valorResidual: vrNum,
-      });
+      preview = generarTablaAmortizacion({ monto: capitalBase, tasaAnual: tasaEfectiva / 100, plazoMeses: Number(form.plazo_meses), frecuencia: freq, metodo: form.metodo_amort, fechaOrigen: form.fecha_origen, crecimientoPeriodo: form.metodo_amort === "creciente" ? Number(form.crecimiento) / 100 : undefined, graciaPeridos: graciaNum > 0 ? calcularGraciaPeridos(graciaNum, freq) : 0, tipoGracia: graciaNum > 0 ? form.tipo_gracia : "ninguna", valorResidual: vrNum });
     } catch (e: any) { previewErr = e.message; }
   }
-
-  // Preview factoraje
   let previewFact: DesgloseFactoraje | null = null;
   let previewFactErr: string | null = null;
   if (esFactoraje && Number(form.monto_factura) > 0 && Number(form.tasa_descuento) > 0 && form.fecha_vencimiento) {
     try {
-      previewFact = calcularFactoraje({
-        montoFactura: Number(form.monto_factura),
-        aforo: Number(form.aforo) || 80,
-        tasaDescuento: Number(form.tasa_descuento),
-        comisionPct: Number(form.comision_pct) || 0,
-        fechaOrigen: form.fecha_origen,
-        fechaVencimiento: form.fecha_vencimiento,
-      });
+      previewFact = calcularFactoraje({ montoFactura: Number(form.monto_factura), aforo: Number(form.aforo) || 80, tasaDescuento: Number(form.tasa_descuento), comisionPct: Number(form.comision_pct) || 0, fechaOrigen: form.fecha_origen, fechaVencimiento: form.fecha_vencimiento });
     } catch (e: any) { previewFactErr = e.message; }
+  }
+
+  // Validation per step
+  function validarPaso(s: number): string | null {
+    if (s === 0) {
+      if (!form.acreditado) return "Ingresa el acreditado.";
+      if (esFactoraje && !form.deudor) return "Ingresa el deudor.";
+    }
+    if (s === 1) {
+      if (esFactoraje) {
+        if (!form.monto_factura || Number(form.monto_factura) <= 0) return "Ingresa el monto de la factura.";
+        if (!form.tasa_descuento || Number(form.tasa_descuento) <= 0) return "Ingresa la tasa de descuento.";
+        if (!form.fecha_vencimiento) return "Ingresa la fecha de vencimiento.";
+        const aforoN = Number(form.aforo) || 0;
+        if (aforoN < 1 || aforoN > 100) return "El aforo debe estar entre 1% y 100%.";
+      } else if (esArrendamiento) {
+        if (!form.valor_bien || Number(form.valor_bien) <= 0) return "Ingresa el valor del bien.";
+        if (montoFinanciado <= 0) return "El monto a financiar debe ser positivo.";
+        if (tasaEfectiva <= 0) return "La tasa debe ser mayor a 0.";
+        if (!form.plazo_meses) return "Ingresa el plazo.";
+        if (vrNum >= montoFinanciado) return "El valor residual debe ser menor al monto financiado.";
+      } else {
+        if (!form.monto) return "Ingresa el monto.";
+        if (tasaEfectiva <= 0) return "La tasa debe ser mayor a 0.";
+        if (!form.plazo_meses) return "Ingresa el plazo.";
+        if (graciaNum >= Number(form.plazo_meses)) return "La gracia debe ser menor al plazo.";
+        if (form.tipo_disposicion === "multiple") {
+          const sumDisp = disposiciones.reduce((s, d) => s + (Number(d.monto) || 0), 0);
+          if (sumDisp > Number(form.monto)) return "La suma de disposiciones excede el monto autorizado.";
+        }
+      }
+    }
+    return null;
+  }
+
+  function siguiente() {
+    const err = validarPaso(step);
+    if (err) { setError(err); return; }
+    setError(null);
+    setStep(step + 1);
   }
 
   async function guardar() {
     setError(null);
-
-    // Validación extra de disposiciones múltiples (no manejada por construirOperacion)
-    if (!form.acreditado) { setError("Ingresa el acreditado."); return; }
-    if (tipoProducto === "credito_simple" && form.tipo_disposicion === "multiple") {
-      const sumDisp = disposiciones.reduce((s, d) => s + (Number(d.monto) || 0), 0);
-      if (sumDisp > Number(form.monto)) { setError("La suma de disposiciones excede el monto autorizado."); return; }
-    }
-
-    // Construir la operación con la función compartida
     const input: InputOperacion = {
-      tipo_producto: tipoProducto,
-      acreditado: form.acreditado,
-      rfc: form.rfc || undefined,
-      fecha_origen: form.fecha_origen,
-      monto: Number(form.monto) || 0,
-      tipo_tasa: form.tipo_tasa,
-      tasa_anual_pct: Number(form.tasa_anual) || 0,
-      tasa_referencia: form.tasa_referencia,
-      valor_referencia_pct: Number(form.valor_referencia) || 0,
-      spread_pp: Number(form.spread_pp) || 0,
-      plazo_meses: Number(form.plazo_meses) || 0,
-      frecuencia: form.frecuencia,
-      metodo_amort: form.metodo_amort,
-      crecimiento_pct: Number(form.crecimiento) || 5,
-      tipo_garantia: form.tipo_garantia,
-      periodo_gracia_meses: graciaNum,
-      tipo_gracia: form.tipo_gracia,
-      tipo_disposicion: esArrendamiento ? "unica" : form.tipo_disposicion as "unica" | "multiple",
-      valor_bien: Number(form.valor_bien) || 0,
-      enganche: Number(form.enganche) || 0,
-      valor_residual: Number(form.valor_residual) || 0,
-      deudor: form.deudor || undefined,
-      monto_factura: Number(form.monto_factura) || 0,
-      aforo_pct: Number(form.aforo) || 80,
-      tasa_descuento_pct: Number(form.tasa_descuento) || 0,
-      comision_pct: Number(form.comision_pct) || 0,
+      tipo_producto: tipoProducto, acreditado: form.acreditado, rfc: form.rfc || undefined, fecha_origen: form.fecha_origen,
+      monto: Number(form.monto) || 0, tipo_tasa: form.tipo_tasa, tasa_anual_pct: Number(form.tasa_anual) || 0,
+      tasa_referencia: form.tasa_referencia, valor_referencia_pct: Number(form.valor_referencia) || 0, spread_pp: Number(form.spread_pp) || 0,
+      plazo_meses: Number(form.plazo_meses) || 0, frecuencia: form.frecuencia, metodo_amort: form.metodo_amort,
+      crecimiento_pct: Number(form.crecimiento) || 5, tipo_garantia: form.tipo_garantia, periodo_gracia_meses: graciaNum,
+      tipo_gracia: form.tipo_gracia, tipo_disposicion: esArrendamiento ? "unica" : form.tipo_disposicion as "unica" | "multiple",
+      valor_bien: Number(form.valor_bien) || 0, enganche: Number(form.enganche) || 0, valor_residual: Number(form.valor_residual) || 0,
+      deudor: form.deudor || undefined, monto_factura: Number(form.monto_factura) || 0, aforo_pct: Number(form.aforo) || 80,
+      tasa_descuento_pct: Number(form.tasa_descuento) || 0, comision_pct: Number(form.comision_pct) || 0,
       fecha_vencimiento: form.fecha_vencimiento || undefined,
     };
-
     let resultado;
-    try {
-      resultado = construirOperacion(input);
-    } catch (e: any) {
-      setError(e.message);
-      return;
-    }
+    try { resultado = construirOperacion(input); } catch (e: any) { setError(e.message); return; }
 
     setGuardando(true);
     const supabase = createClient();
     const { data: userData } = await supabase.auth.getUser();
     const operador = userData.user?.email ?? "sistema";
-
     const { creditoRow, cupones, disposicionMonto } = resultado;
 
     const { data: credito, error: errCred } = await supabase.from("creditos").insert(creditoRow).select().single();
     if (errCred || !credito) { setGuardando(false); setError("Error: " + (errCred?.message ?? "")); return; }
 
-    // Disposiciones
     if (tipoProducto === "credito_simple" && form.tipo_disposicion === "multiple" && disposiciones.length > 0) {
-      await supabase.from("disposiciones").insert(
-        disposiciones.map((d, i) => ({ credito_id: credito.id, numero: i + 1, monto: Number(d.monto), fecha: d.fecha }))
-      );
+      await supabase.from("disposiciones").insert(disposiciones.map((d, i) => ({ credito_id: credito.id, numero: i + 1, monto: Number(d.monto), fecha: d.fecha })));
     } else {
       await supabase.from("disposiciones").insert({ credito_id: credito.id, numero: 1, monto: disposicionMonto, fecha: form.fecha_origen });
     }
-
-    // Amortización
-    await supabase.from("amortizacion").insert(cupones.map((c) => ({
-      credito_id: credito.id, numero_cupon: c.numero_cupon, fecha_pago: c.fecha_pago,
-      saldo_inicial: c.saldo_inicial, capital: c.capital, interes: c.interes,
-      pago_total: c.pago_total, saldo_final: c.saldo_final,
-    })));
-
+    await supabase.from("amortizacion").insert(cupones.map((c) => ({ credito_id: credito.id, numero_cupon: c.numero_cupon, fecha_pago: c.fecha_pago, saldo_inicial: c.saldo_inicial, capital: c.capital, interes: c.interes, pago_total: c.pago_total, saldo_final: c.saldo_final })));
     await supabase.from("bitacora").insert({ entidad: "credito", entidad_id: credito.id, accion: "creado", detalle: { folio: creditoRow.folio, tipo: tipoProducto, monto: creditoRow.monto, cupones: cupones.length }, usuario: operador });
-
     setGuardando(false);
     onSaved();
   }
@@ -728,14 +717,108 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
     <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-faint)", marginBottom: 12, marginTop: 8, borderBottom: "1px solid var(--line-soft)", paddingBottom: 6 }}>{t}</div>
   );
 
-  return (
-    <Overlay onClose={onClose}>
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 0 }}>
-        <div style={{ padding: isMobile ? "24px 20px" : "30px 30px", borderRight: isMobile ? "none" : "1px solid var(--line)", maxHeight: "86vh", overflowY: "auto" }}>
-          <h2 style={{ fontSize: 20, fontWeight: 600, color: "#0a1628", marginBottom: 16 }}>Originar producto</h2>
-          <div style={{ display: "grid", gap: 12 }}>
+  // ── Shared tasa fields ──
+  const tasaFields = (
+    <>
+      <div className="field">
+        <label>Tipo de tasa</label>
+        <div style={{ display: "flex", gap: 6 }}>
+          {(["fija", "variable"] as const).map((t) => (
+            <button key={t} onClick={() => set("tipo_tasa", t)} style={{ flex: 1, padding: "8px 0", fontSize: 13, fontFamily: "inherit", fontWeight: form.tipo_tasa === t ? 600 : 400, border: form.tipo_tasa === t ? "1px solid var(--amber)" : "1px solid var(--line)", borderRadius: 6, background: form.tipo_tasa === t ? "var(--amber-soft)" : "transparent", color: form.tipo_tasa === t ? "var(--amber)" : "var(--text-dim)", cursor: "pointer" }}>
+              {t === "fija" ? "Fija" : "Variable"}
+            </button>
+          ))}
+        </div>
+      </div>
+      {form.tipo_tasa === "fija" ? (
+        <div className="field"><label>Tasa anual (%) *</label><input className="input mono" type="number" value={form.tasa_anual} onChange={(e) => set("tasa_anual", e.target.value)} placeholder="24" /></div>
+      ) : (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            <div className="field"><label>Referencia</label><select className="select" value={form.tasa_referencia} onChange={(e) => set("tasa_referencia", e.target.value)}><option value="TIIE_28">TIIE 28d</option><option value="TIIE_91">TIIE 91d</option><option value="TIIE_182">TIIE 182d</option></select></div>
+            <div className="field"><label>Valor ref (%)</label><input className="input mono" type="number" value={form.valor_referencia} onChange={(e) => set("valor_referencia", e.target.value)} placeholder="10.50" /></div>
+            <div className="field"><label>Spread (pp)</label><input className="input mono" type="number" value={form.spread_pp} onChange={(e) => set("spread_pp", e.target.value)} placeholder="4.50" /></div>
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text-dim)", background: "var(--amber-soft)", padding: "6px 10px", borderRadius: 6 }}>Tasa efectiva: <strong className="mono">{tasaEfectiva.toFixed(2)}%</strong></div>
+        </>
+      )}
+    </>
+  );
 
-            {/* SELECTOR DE PRODUCTO */}
+  const graciaFields = (
+    <div style={{ display: "grid", gridTemplateColumns: graciaNum > 0 ? "1fr 1fr" : "1fr", gap: 12 }}>
+      <div className="field"><label>Periodo de gracia (meses)</label><input className="input mono" type="number" min="0" value={form.periodo_gracia_meses} onChange={(e) => set("periodo_gracia_meses", e.target.value)} /></div>
+      {graciaNum > 0 && (
+        <div className="field"><label>Tipo de gracia</label><select className="select" value={form.tipo_gracia} onChange={(e) => set("tipo_gracia", e.target.value as TipoGracia)}><option value="capital">Solo interés (capital)</option><option value="total">Sin pagos (total)</option></select></div>
+      )}
+    </div>
+  );
+
+  // ── Preview component (reused in step 3) ──
+  const previewPanel = (
+    <div style={{ background: "#f4f6f8", borderRadius: 8, padding: isMobile ? "16px" : "20px 22px" }}>
+      <h3 style={{ fontSize: 15, fontWeight: 600, color: "#0a1628", marginBottom: 8 }}>Vista previa</h3>
+      {esFactoraje ? (
+        previewFactErr ? <p style={{ color: "var(--red)", fontSize: 13 }}>{previewFactErr}</p>
+        : !previewFact ? <p style={{ color: "var(--text-faint)", fontSize: 13 }}>Datos insuficientes para el desglose.</p>
+        : (
+          <div className="panel" style={{ padding: "16px 18px", marginTop: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Desglose de la operación</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              <DesgloseRow label="Monto factura" valor={mxn(Number(form.monto_factura))} />
+              <DesgloseRow label={`Anticipo (${form.aforo}%)`} valor={mxn(previewFact.anticipo)} />
+              <DesgloseRow label={`Descuento (${previewFact.dias}d)`} valor={`- ${mxn(previewFact.descuento)}`} dim />
+              <DesgloseRow label={`Comisión (${form.comision_pct}%)`} valor={`- ${mxn(previewFact.comision)}`} dim />
+              <div style={{ borderTop: "1px solid var(--line)", paddingTop: 8 }} />
+              <DesgloseRow label="Desembolso al cedente" valor={mxn(previewFact.desembolso)} bold />
+              <DesgloseRow label="Reserva" valor={mxn(previewFact.reserva)} dim />
+              <div style={{ borderTop: "1px solid var(--line)", paddingTop: 8 }} />
+              <DesgloseRow label="Ingreso CapiProm" valor={mxn(previewFact.ingresoFactor)} bold amber />
+              <DesgloseRow label="Días al vencimiento" valor={String(previewFact.dias)} dim />
+            </div>
+          </div>
+        )
+      ) : (
+        previewErr ? <p style={{ color: "var(--red)", fontSize: 13 }}>{previewErr}</p>
+        : preview.length === 0 ? <p style={{ color: "var(--text-faint)", fontSize: 13 }}>Datos insuficientes para la tabla.</p>
+        : (
+          <>
+            <p style={{ color: "var(--text-dim)", fontSize: 13, marginBottom: 10 }}>
+              {preview.length} cupones{vrNum > 0 ? " (incl. opción de compra)" : ""}{graciaNum > 0 ? ` · ${graciaNum}m gracia` : ""}
+            </p>
+            <div style={{ overflowX: "auto" }}>
+              <table className="table" style={{ fontSize: 12.5 }}>
+                <thead><tr><th>#</th><th>Fecha</th><th style={{ textAlign: "right" }}>Capital</th><th style={{ textAlign: "right" }}>Interés</th><th style={{ textAlign: "right" }}>Pago</th></tr></thead>
+                <tbody>
+                  {preview.map((c, idx) => {
+                    const esOC = vrNum > 0 && idx === preview.length - 1;
+                    return (
+                      <tr key={c.numero_cupon} style={esOC ? { background: "var(--amber-soft)" } : undefined}>
+                        <td className="mono">{esOC ? "OC" : c.numero_cupon}</td>
+                        <td style={{ fontSize: 11.5 }}>{fecha(c.fecha_pago)}</td>
+                        <td className="mono" style={{ textAlign: "right" }}>{mxn(c.capital)}</td>
+                        <td className="mono" style={{ textAlign: "right", color: "var(--text-dim)" }}>{mxn(c.interes)}</td>
+                        <td className="mono" style={{ textAlign: "right" }}>{mxn(c.pago_total)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )
+      )}
+    </div>
+  );
+
+  return (
+    <Overlay onClose={onClose} wide={step === 2}>
+      <div style={{ padding: isMobile ? "24px 20px" : "30px 32px", maxHeight: "90vh", overflowY: "auto" }}>
+        <StepIndicator current={step} isMobile={isMobile} />
+
+        {/* ═══════ PASO 1: Producto y partes ═══════ */}
+        {step === 0 && (
+          <div style={{ display: "grid", gap: 12 }}>
             {sectionTitle("Tipo de producto")}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
               {(["credito_simple", "arrendamiento_financiero", "arrendamiento_puro", "factoraje"] as TipoProducto[]).map((tp) => (
@@ -745,12 +828,20 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
               ))}
             </div>
 
-            {/* A. Acreditado */}
             {sectionTitle(esFactoraje ? "Cedente" : "Acreditado")}
             <div className="field"><label>{esFactoraje ? "Cedente (razón social) *" : "Nombre / razón social *"}</label><input className="input" value={form.acreditado} onChange={(e) => set("acreditado", e.target.value)} /></div>
             <div className="field"><label>RFC</label><input className="input" value={form.rfc} onChange={(e) => set("rfc", e.target.value.toUpperCase())} /></div>
+            {esFactoraje && (
+              <div className="field"><label>Deudor (quién paga la factura) *</label><input className="input" value={form.deudor} onChange={(e) => set("deudor", e.target.value)} /></div>
+            )}
+          </div>
+        )}
 
-            {/* ======================== CRÉDITO SIMPLE ======================== */}
+        {/* ═══════ PASO 2: Condiciones ═══════ */}
+        {step === 1 && (
+          <div style={{ display: "grid", gap: 12 }}>
+
+            {/* CRÉDITO SIMPLE */}
             {tipoProducto === "credito_simple" && (<>
               {sectionTitle("Estructura financiera")}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -761,54 +852,19 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
                 <div className="field"><label>Frecuencia</label><select className="select" value={form.frecuencia} onChange={(e) => set("frecuencia", e.target.value)}><option value="mensual">Mensual</option><option value="quincenal">Quincenal</option><option value="semanal">Semanal</option></select></div>
                 <div className="field"><label>Fecha de origen</label><input className="input mono" type="date" value={form.fecha_origen} onChange={(e) => set("fecha_origen", e.target.value)} /></div>
               </div>
-
-              <div className="field">
-                <label>Tipo de tasa</label>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {(["fija", "variable"] as const).map((t) => (
-                    <button key={t} onClick={() => set("tipo_tasa", t)} style={{ flex: 1, padding: "8px 0", fontSize: 13, fontFamily: "inherit", fontWeight: form.tipo_tasa === t ? 600 : 400, border: form.tipo_tasa === t ? "1px solid var(--amber)" : "1px solid var(--line)", borderRadius: 6, background: form.tipo_tasa === t ? "var(--amber-soft)" : "transparent", color: form.tipo_tasa === t ? "var(--amber)" : "var(--text-dim)", cursor: "pointer" }}>
-                      {t === "fija" ? "Fija" : "Variable"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {form.tipo_tasa === "fija" ? (
-                <div className="field"><label>Tasa anual (%) *</label><input className="input mono" type="number" value={form.tasa_anual} onChange={(e) => set("tasa_anual", e.target.value)} placeholder="24" /></div>
-              ) : (
-                <>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                    <div className="field"><label>Referencia</label><select className="select" value={form.tasa_referencia} onChange={(e) => set("tasa_referencia", e.target.value)}><option value="TIIE_28">TIIE 28d</option><option value="TIIE_91">TIIE 91d</option><option value="TIIE_182">TIIE 182d</option></select></div>
-                    <div className="field"><label>Valor ref (%)</label><input className="input mono" type="number" value={form.valor_referencia} onChange={(e) => set("valor_referencia", e.target.value)} placeholder="10.50" /></div>
-                    <div className="field"><label>Spread (pp)</label><input className="input mono" type="number" value={form.spread_pp} onChange={(e) => set("spread_pp", e.target.value)} placeholder="4.50" /></div>
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-dim)", background: "var(--amber-soft)", padding: "6px 10px", borderRadius: 6 }}>Tasa efectiva: <strong className="mono">{tasaEfectiva.toFixed(2)}%</strong></div>
-                </>
-              )}
-
+              {tasaFields}
               <div className="field">
                 <label>Método de amortización</label>
                 <select className="select" value={form.metodo_amort} onChange={(e) => set("metodo_amort", e.target.value)}>
-                  <option value="frances">Francés (cuota fija)</option>
-                  <option value="lineal">Lineal (capital constante)</option>
-                  <option value="bullet">Bullet (capital al final)</option>
-                  <option value="creciente">Creciente</option>
+                  <option value="frances">Francés (cuota fija)</option><option value="lineal">Lineal (capital constante)</option><option value="bullet">Bullet (capital al final)</option><option value="creciente">Creciente</option>
                 </select>
               </div>
               {form.metodo_amort === "creciente" && (
                 <div className="field"><label>Crecimiento por periodo (%)</label><input className="input mono" type="number" value={form.crecimiento} onChange={(e) => set("crecimiento", e.target.value)} placeholder="5" style={{ maxWidth: 160 }} /></div>
               )}
-
               {sectionTitle("Estructura de la línea")}
               <div className="field"><label>Tipo de garantía</label><select className="select" value={form.tipo_garantia} onChange={(e) => set("tipo_garantia", e.target.value)}><option value="quirografaria">Quirografaria</option><option value="fideicomiso_flujo">Fideicomiso de flujo</option><option value="derecho_cobro">Cesión de derecho de cobro</option></select></div>
-
-              <div style={{ display: "grid", gridTemplateColumns: graciaNum > 0 ? "1fr 1fr" : "1fr", gap: 12 }}>
-                <div className="field"><label>Periodo de gracia (meses)</label><input className="input mono" type="number" min="0" value={form.periodo_gracia_meses} onChange={(e) => set("periodo_gracia_meses", e.target.value)} /></div>
-                {graciaNum > 0 && (
-                  <div className="field"><label>Tipo de gracia</label><select className="select" value={form.tipo_gracia} onChange={(e) => set("tipo_gracia", e.target.value as TipoGracia)}><option value="capital">Solo interés (capital)</option><option value="total">Sin pagos (total)</option></select></div>
-                )}
-              </div>
-
+              {graciaFields}
               <div className="field">
                 <label>Tipo de disposición</label>
                 <div style={{ display: "flex", gap: 6 }}>
@@ -829,94 +885,44 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
                     </div>
                   ))}
                   <button className="btn btn-ghost" onClick={() => setDisposiciones([...disposiciones, { monto: "", fecha: form.fecha_origen }])} style={{ fontSize: 12, padding: "6px 12px" }}>+ Agregar disposición</button>
-                  {disposiciones.length > 0 && (
-                    <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 8 }}>
-                      Dispuesto: <span className="mono">{mxn(disposiciones.reduce((s, d) => s + (Number(d.monto) || 0), 0))}</span> de {mxn(Number(form.monto) || 0)} autorizado
-                    </div>
-                  )}
+                  {disposiciones.length > 0 && <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 8 }}>Dispuesto: <span className="mono">{mxn(disposiciones.reduce((s, d) => s + (Number(d.monto) || 0), 0))}</span> de {mxn(Number(form.monto) || 0)} autorizado</div>}
                 </div>
               )}
             </>)}
 
-            {/* ======================== ARRENDAMIENTO ======================== */}
+            {/* ARRENDAMIENTO */}
             {esArrendamiento && (<>
               {sectionTitle("Bien arrendado")}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div className="field"><label>Valor del bien (MXN) *</label><input className="input mono" type="number" value={form.valor_bien} onChange={(e) => set("valor_bien", e.target.value)} placeholder="500000" /></div>
                 <div className="field"><label>Enganche (MXN)</label><input className="input mono" type="number" value={form.enganche} onChange={(e) => set("enganche", e.target.value)} placeholder="0" /></div>
               </div>
-              {montoFinanciado > 0 && (
-                <div style={{ fontSize: 12, color: "var(--text-dim)", background: "var(--amber-soft)", padding: "6px 10px", borderRadius: 6 }}>
-                  Monto a financiar: <strong className="mono">{mxn(montoFinanciado)}</strong>
-                </div>
-              )}
-
-              {sectionTitle("Términos del arrendamiento")}
+              {montoFinanciado > 0 && <div style={{ fontSize: 12, color: "var(--text-dim)", background: "var(--amber-soft)", padding: "6px 10px", borderRadius: 6 }}>Monto a financiar: <strong className="mono">{mxn(montoFinanciado)}</strong></div>}
+              {sectionTitle("Términos")}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div className="field"><label>Plazo (meses) *</label><input className="input mono" type="number" value={form.plazo_meses} onChange={(e) => set("plazo_meses", e.target.value)} placeholder="36" /></div>
                 <div className="field"><label>Frecuencia</label><select className="select" value={form.frecuencia} onChange={(e) => set("frecuencia", e.target.value)}><option value="mensual">Mensual</option><option value="quincenal">Quincenal</option><option value="semanal">Semanal</option></select></div>
               </div>
               <div className="field"><label>Fecha de origen</label><input className="input mono" type="date" value={form.fecha_origen} onChange={(e) => set("fecha_origen", e.target.value)} /></div>
-
-              <div className="field">
-                <label>Tipo de tasa</label>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {(["fija", "variable"] as const).map((t) => (
-                    <button key={t} onClick={() => set("tipo_tasa", t)} style={{ flex: 1, padding: "8px 0", fontSize: 13, fontFamily: "inherit", fontWeight: form.tipo_tasa === t ? 600 : 400, border: form.tipo_tasa === t ? "1px solid var(--amber)" : "1px solid var(--line)", borderRadius: 6, background: form.tipo_tasa === t ? "var(--amber-soft)" : "transparent", color: form.tipo_tasa === t ? "var(--amber)" : "var(--text-dim)", cursor: "pointer" }}>
-                      {t === "fija" ? "Fija" : "Variable"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {form.tipo_tasa === "fija" ? (
-                <div className="field"><label>Tasa anual (%) *</label><input className="input mono" type="number" value={form.tasa_anual} onChange={(e) => set("tasa_anual", e.target.value)} placeholder="18" /></div>
-              ) : (
-                <>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                    <div className="field"><label>Referencia</label><select className="select" value={form.tasa_referencia} onChange={(e) => set("tasa_referencia", e.target.value)}><option value="TIIE_28">TIIE 28d</option><option value="TIIE_91">TIIE 91d</option><option value="TIIE_182">TIIE 182d</option></select></div>
-                    <div className="field"><label>Valor ref (%)</label><input className="input mono" type="number" value={form.valor_referencia} onChange={(e) => set("valor_referencia", e.target.value)} placeholder="10.50" /></div>
-                    <div className="field"><label>Spread (pp)</label><input className="input mono" type="number" value={form.spread_pp} onChange={(e) => set("spread_pp", e.target.value)} placeholder="4.50" /></div>
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-dim)", background: "var(--amber-soft)", padding: "6px 10px", borderRadius: 6 }}>Tasa efectiva: <strong className="mono">{tasaEfectiva.toFixed(2)}%</strong></div>
-                </>
-              )}
-
-              <div className="field">
-                <label>Método de amortización</label>
-                <select className="select" value={form.metodo_amort} onChange={(e) => set("metodo_amort", e.target.value)}>
-                  <option value="frances">Francés (cuota fija)</option>
-                  <option value="lineal">Lineal (capital constante)</option>
-                </select>
-              </div>
-
+              {tasaFields}
+              <div className="field"><label>Método de amortización</label><select className="select" value={form.metodo_amort} onChange={(e) => set("metodo_amort", e.target.value)}><option value="frances">Francés (cuota fija)</option><option value="lineal">Lineal (capital constante)</option></select></div>
               <div className="field">
                 <label>Valor residual / Opción de compra (MXN)</label>
                 <input className="input mono" type="number" value={form.valor_residual} onChange={(e) => set("valor_residual", e.target.value)} placeholder={tipoProducto === "arrendamiento_financiero" ? String(Math.round((Number(form.valor_bien) || 0) * 0.01)) || "1% del bien" : String(Math.round((Number(form.valor_bien) || 0) * 0.25)) || "20-40% del bien"} />
-                {Number(form.valor_bien) > 0 && vrNum > 0 && (
-                  <span style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2, display: "block" }}>{((vrNum / Number(form.valor_bien)) * 100).toFixed(1)}% del valor del bien</span>
-                )}
+                {Number(form.valor_bien) > 0 && vrNum > 0 && <span style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2, display: "block" }}>{((vrNum / Number(form.valor_bien)) * 100).toFixed(1)}% del valor del bien</span>}
               </div>
-
               {sectionTitle("Garantía")}
               <div className="field"><label>Tipo de garantía</label><select className="select" value={form.tipo_garantia} onChange={(e) => set("tipo_garantia", e.target.value)}><option value="bien_arrendado">Bien arrendado</option><option value="quirografaria">Quirografaria</option><option value="fideicomiso_flujo">Fideicomiso de flujo</option><option value="derecho_cobro">Cesión de derecho de cobro</option></select></div>
-
-              <div style={{ display: "grid", gridTemplateColumns: graciaNum > 0 ? "1fr 1fr" : "1fr", gap: 12 }}>
-                <div className="field"><label>Periodo de gracia (meses)</label><input className="input mono" type="number" min="0" value={form.periodo_gracia_meses} onChange={(e) => set("periodo_gracia_meses", e.target.value)} /></div>
-                {graciaNum > 0 && (
-                  <div className="field"><label>Tipo de gracia</label><select className="select" value={form.tipo_gracia} onChange={(e) => set("tipo_gracia", e.target.value as TipoGracia)}><option value="capital">Solo interés (capital)</option><option value="total">Sin pagos (total)</option></select></div>
-                )}
-              </div>
+              {graciaFields}
             </>)}
 
-            {/* ======================== FACTORAJE ======================== */}
+            {/* FACTORAJE */}
             {esFactoraje && (<>
-              {sectionTitle("Deudor y factura")}
-              <div className="field"><label>Deudor (quién paga la factura) *</label><input className="input" value={form.deudor} onChange={(e) => set("deudor", e.target.value)} /></div>
+              {sectionTitle("Factura")}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div className="field"><label>Monto de la factura (MXN) *</label><input className="input mono" type="number" value={form.monto_factura} onChange={(e) => set("monto_factura", e.target.value)} placeholder="500000" /></div>
                 <div className="field"><label>Aforo (%) *</label><input className="input mono" type="number" value={form.aforo} onChange={(e) => set("aforo", e.target.value)} placeholder="80" /></div>
               </div>
-
               {sectionTitle("Condiciones")}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div className="field"><label>Tasa de descuento anual (%) *</label><input className="input mono" type="number" value={form.tasa_descuento} onChange={(e) => set("tasa_descuento", e.target.value)} placeholder="24" /></div>
@@ -927,73 +933,25 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
                 <div className="field"><label>Fecha de vencimiento *</label><input className="input mono" type="date" value={form.fecha_vencimiento} onChange={(e) => set("fecha_vencimiento", e.target.value)} /></div>
               </div>
             </>)}
-
-            {error && <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "10px 14px", borderRadius: 6, fontSize: 13.5 }}>{error}</div>}
-            <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
-              <button className="btn btn-ghost" onClick={onClose} style={{ flex: 1 }}>Cancelar</button>
-              <button className="btn btn-primary" onClick={guardar} disabled={guardando} style={{ flex: 1 }}>{guardando ? "Guardando…" : "Originar"}</button>
-            </div>
           </div>
-        </div>
+        )}
 
-        {/* Preview */}
-        <div style={{ padding: isMobile ? "20px" : "30px 26px", background: "#f4f6f8", maxHeight: "82vh", overflowY: "auto" }}>
-          <h3 style={{ fontSize: 16, fontWeight: 600, color: "#0a1628", marginBottom: 6 }}>Vista previa</h3>
+        {/* ═══════ PASO 3: Revisar ═══════ */}
+        {step === 2 && (
+          <div>{previewPanel}</div>
+        )}
 
-          {/* Factoraje preview: tarjeta de desglose */}
-          {esFactoraje ? (
-            previewFactErr ? <p style={{ color: "var(--red)", fontSize: 13 }}>{previewFactErr}</p>
-            : !previewFact ? <p style={{ color: "var(--text-faint)", fontSize: 13.5 }}>Captura factura, tasa y vencimiento para ver el desglose.</p>
-            : (
-              <div style={{ marginTop: 12 }}>
-                <div className="panel" style={{ padding: "18px 20px" }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#0a1628", marginBottom: 14 }}>Desglose de la operación</div>
-                  <div style={{ display: "grid", gap: 10 }}>
-                    <DesgloseRow label="Monto factura" valor={mxn(Number(form.monto_factura))} />
-                    <DesgloseRow label={`Anticipo (${form.aforo}%)`} valor={mxn(previewFact.anticipo)} />
-                    <DesgloseRow label={`Descuento (${previewFact.dias}d)`} valor={`- ${mxn(previewFact.descuento)}`} dim />
-                    <DesgloseRow label={`Comisión (${form.comision_pct}%)`} valor={`- ${mxn(previewFact.comision)}`} dim />
-                    <div style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }} />
-                    <DesgloseRow label="Desembolso al cedente" valor={mxn(previewFact.desembolso)} bold />
-                    <DesgloseRow label="Reserva" valor={mxn(previewFact.reserva)} dim />
-                    <div style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }} />
-                    <DesgloseRow label="Ingreso CapiProm" valor={mxn(previewFact.ingresoFactor)} bold amber />
-                    <DesgloseRow label="Días al vencimiento" valor={String(previewFact.dias)} dim />
-                  </div>
-                </div>
-              </div>
-            )
-          ) : (
-            /* Crédito / Arrendamiento preview: tabla de amortización */
-            previewErr ? <p style={{ color: "var(--red)", fontSize: 13 }}>{previewErr}</p>
-            : preview.length === 0 ? <p style={{ color: "var(--text-faint)", fontSize: 13.5 }}>{esArrendamiento ? "Captura valor del bien, tasa y plazo para ver la tabla." : "Captura monto, tasa y plazo para ver la tabla."}</p>
-            : (
-              <>
-                <p style={{ color: "var(--text-dim)", fontSize: 13, marginBottom: 14 }}>
-                  {preview.length} cupones{vrNum > 0 ? " (incl. opción de compra)" : ""} · {graciaNum > 0 ? `${graciaNum}m gracia · ` : ""}primer pago <span className="mono" style={{ color: "var(--amber)" }}>{mxn(preview[0].pago_total)}</span>
-                </p>
-                <div style={{ overflowX: "auto" }}>
-                <table className="table" style={{ fontSize: 12.5 }}>
-                  <thead><tr><th>#</th><th>Fecha</th><th style={{ textAlign: "right" }}>Capital</th><th style={{ textAlign: "right" }}>Interés</th><th style={{ textAlign: "right" }}>Pago</th></tr></thead>
-                  <tbody>
-                    {preview.map((c, idx) => {
-                      const esOC = vrNum > 0 && idx === preview.length - 1;
-                      return (
-                        <tr key={c.numero_cupon} style={esOC ? { background: "var(--amber-soft)" } : undefined}>
-                          <td className="mono">{esOC ? "OC" : c.numero_cupon}</td>
-                          <td style={{ fontSize: 11.5 }}>{fecha(c.fecha_pago)}</td>
-                          <td className="mono" style={{ textAlign: "right" }}>{mxn(c.capital)}</td>
-                          <td className="mono" style={{ textAlign: "right", color: "var(--text-dim)" }}>{mxn(c.interes)}</td>
-                          <td className="mono" style={{ textAlign: "right" }}>{mxn(c.pago_total)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                </div>
-              </>
-            )
-          )}
+        {/* Error + navigation */}
+        {error && <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "10px 14px", borderRadius: 6, fontSize: 13.5, marginTop: 12 }}>{error}</div>}
+        <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+          {step === 0
+            ? <button className="btn btn-ghost" onClick={onClose} style={{ flex: 1 }}>Cancelar</button>
+            : <button className="btn btn-ghost" onClick={() => { setStep(step - 1); setError(null); }} style={{ flex: 1 }}>Atrás</button>
+          }
+          {step < 2
+            ? <button className="btn btn-primary" onClick={siguiente} style={{ flex: 1 }}>Siguiente</button>
+            : <button className="btn btn-primary" onClick={guardar} disabled={guardando} style={{ flex: 1 }}>{guardando ? "Guardando…" : "Originar"}</button>
+          }
         </div>
       </div>
     </Overlay>
