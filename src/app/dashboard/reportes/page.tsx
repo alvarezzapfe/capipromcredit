@@ -20,10 +20,10 @@ import {
 } from "@/lib/reportes";
 import { useIsMobile } from "@/lib/useIsMobile";
 
-const METODOS = ["lineal", "bullet", "creciente"] as const;
+const METODOS = ["frances", "lineal", "bullet", "creciente"] as const;
 const PIE_COLORS: Record<string, string> = {
   vigente: "#16a34a", en_mora: "#f59e0b", vencido: "#dc2626",
-  liquidado: "#6366f1", cancelado: "#94a3b8",
+  liquidado: "#6366f1", cancelado: "#94a3b8", reestructurado: "#8b5cf6",
 };
 const hoyStr = () => format(new Date(), "yyyy-MM-dd");
 
@@ -96,7 +96,9 @@ export default function Reportes() {
 
   // KPIs
   const kpis = useMemo(() => {
-    const saldoInsoluto = filtrados.reduce((s, c) => s + calcularSaldoInsoluto(c.id, amort), 0);
+    const saldoInsoluto = filtrados
+      .filter((c) => ["vigente", "en_mora"].includes(c.estatus))
+      .reduce((s, c) => s + calcularSaldoInsoluto(c.id, amort), 0);
     const interesDevengado = calcularInteresDevengado(amortFiltrada, new Date(desde), new Date(hasta));
     const pc30 = calcularPorCobrarProx30Dias(amortFiltrada);
     const enMora = filtrados.filter((c) => c.estatus === "en_mora" || c.estatus === "vencido").length;
@@ -150,7 +152,12 @@ export default function Reportes() {
     else if (p === "mes_pasado") { const m = subMonths(hoy, 1); setDesde(format(startOfMonth(m), "yyyy-MM-dd")); setHasta(format(new Date(m.getFullYear(), m.getMonth() + 1, 0), "yyyy-MM-dd")); }
     else if (p === "ytd") { setDesde(format(startOfYear(hoy), "yyyy-MM-dd")); setHasta(hoyStr()); }
     else if (p === "12m") { setDesde(format(subMonths(hoy, 12), "yyyy-MM-dd")); setHasta(hoyStr()); }
-    else { setDesde("2000-01-01"); setHasta(hoyStr()); }
+    else {
+      const oldest = creditos.length > 0
+        ? creditos.reduce((min, c) => c.fecha_origen < min ? c.fecha_origen : min, creditos[0].fecha_origen)
+        : format(startOfYear(new Date()), "yyyy-MM-dd");
+      setDesde(oldest); setHasta(hoyStr());
+    }
   }
 
   function limpiar() {
@@ -295,7 +302,7 @@ export default function Reportes() {
       {/* KPIs */}
       <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: isMobile ? 10 : 16, marginBottom: 24 }}>
         <KpiCard label="Saldo insoluto total" valor={mxn(kpis.saldoInsoluto)} sub={`${filtrados.length} créditos`} />
-        <KpiCard label="Interés devengado" valor={mxn(kpis.interesDevengado)} sub={`Del ${desde} al ${hasta}`} />
+        <KpiCard label="Interés devengado" valor={mxn(kpis.interesDevengado)} sub={`Del ${fecha(desde)} al ${fecha(hasta)}`} />
         <KpiCard label="Por cobrar · 30 días" valor={mxn(kpis.porCobrar30)} sub={`${kpis.cupones30} cupones`} />
         <KpiCard label="Morosidad" valor={`${kpis.morosidad.toFixed(1)}%`} sub={`${kpis.enMoraCount} en mora · ${kpis.vencidos} vencidos`} />
       </div>
