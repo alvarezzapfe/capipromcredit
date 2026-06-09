@@ -16,6 +16,8 @@ export interface Cupon {
   interes: number;
   pago_total: number;
   saldo_final: number;
+  valor_referencia?: number;  // TIIE del periodo (solo variable)
+  tasa_aplicada?: number;     // tasa anual efectiva del periodo (solo variable)
 }
 
 export interface ParamsCredito {
@@ -29,6 +31,7 @@ export interface ParamsCredito {
   graciaPeridos?: number;      // periodos de gracia (convertidos de meses)
   tipoGracia?: TipoGracia;
   valorResidual?: number;      // arrendamientos: saldo que queda al final (opción de compra)
+  tasasAnualesPorPeriodo?: number[]; // tasa variable: tasa anual efectiva por cada cupón
 }
 
 const PERIODOS_POR_ANIO: Record<Frecuencia, number> = {
@@ -77,23 +80,28 @@ function periodosGracia(graciaMeses: number, frecuencia: Frecuencia): number {
 }
 
 export function generarTablaAmortizacion(p: ParamsCredito): Cupon[] {
+  const ppa = PERIODOS_POR_ANIO[p.frecuencia];
   const nTotal = numeroCupones(p.plazoMeses, p.frecuencia);
-  const tasaPeriodo = p.tasaAnual / PERIODOS_POR_ANIO[p.frecuencia];
+  const tasaPeriodo = p.tasaAnual / ppa;
   const nGracia = p.graciaPeridos ?? 0;
   const tipoGracia = p.tipoGracia ?? "ninguna";
+  const tasasVar = p.tasasAnualesPorPeriodo; // undefined = tasa fija
 
   if (nGracia >= nTotal) {
     throw new Error("El periodo de gracia debe ser menor al plazo total.");
   }
+
+  // Helper: per-period rate (0-indexed cupón number → period rate)
+  const iPer = (idx: number) => tasasVar ? (tasasVar[idx] ?? p.tasaAnual) / ppa : tasaPeriodo;
 
   // Build grace period coupons first
   const cupones: Cupon[] = [];
   let saldo = p.monto;
 
   for (let i = 1; i <= nGracia; i++) {
-    const interes = rd(saldo * tasaPeriodo);
+    const tp = iPer(i - 1);
+    const interes = rd(saldo * tp);
     if (tipoGracia === "capital") {
-      // Pay interest only
       cupones.push({
         numero_cupon: i,
         fecha_pago: fechaCupon(p.fechaOrigen, p.frecuencia, i),
@@ -104,7 +112,6 @@ export function generarTablaAmortizacion(p: ParamsCredito): Cupon[] {
         saldo_final: rd(saldo),
       });
     } else {
-      // tipoGracia === "total": no payment, interest capitalizes
       const nuevoSaldo = rd(saldo + interes);
       cupones.push({
         numero_cupon: i,
@@ -125,11 +132,25 @@ export function generarTablaAmortizacion(p: ParamsCredito): Cupon[] {
 
   const vr = p.valorResidual ?? 0;
 
+  // Build per-period rates for the amortization portion (after grace)
+  const amortRates = tasasVar
+    ? Array.from({ length: nAmort }, (_, i) => (tasasVar[nGracia + i] ?? p.tasaAnual) / ppa)
+    : null;
+
   let amortCupones: Cupon[];
-  if (p.metodo === "frances") amortCupones = generarFrances(saldo, nAmort, tasaPeriodo, vr);
-  else if (p.metodo === "lineal") amortCupones = generarLineal(saldo, nAmort, tasaPeriodo, vr);
-  else if (p.metodo === "bullet") amortCupones = generarBullet(saldo, nAmort, tasaPeriodo);
-  else amortCupones = generarCreciente(saldo, nAmort, tasaPeriodo, p.crecimientoPeriodo ?? 0.05);
+  if (amortRates) {
+    // Variable-rate path
+    if (p.metodo === "frances") amortCupones = generarFrancesVariable(saldo, nAmort, amortRates, vr);
+    else if (p.metodo === "lineal") amortCupones = generarLinealVariable(saldo, nAmort, amortRates, vr);
+    else if (p.metodo === "bullet") amortCupones = generarBulletVariable(saldo, nAmort, amortRates);
+    else amortCupones = generarCreciente(saldo, nAmort, tasaPeriodo, p.crecimientoPeriodo ?? 0.05);
+  } else {
+    // Fixed-rate path (unchanged)
+    if (p.metodo === "frances") amortCupones = generarFrances(saldo, nAmort, tasaPeriodo, vr);
+    else if (p.metodo === "lineal") amortCupones = generarLineal(saldo, nAmort, tasaPeriodo, vr);
+    else if (p.metodo === "bullet") amortCupones = generarBullet(saldo, nAmort, tasaPeriodo);
+    else amortCupones = generarCreciente(saldo, nAmort, tasaPeriodo, p.crecimientoPeriodo ?? 0.05);
+  }
 
   // Shift cupon numbers and dates
   for (const c of amortCupones) {
@@ -282,6 +303,68 @@ function generarCreciente(monto: number, n: number, tasaPeriodo: number, g: numb
       pago_total: k === n ? rd(capital + interes) : rd(pagoTotal),
       saldo_final: rd(saldoFinal),
     });
+    saldo = saldoFinal;
+  }
+  return cupones;
+}
+
+// -----------------------------------------------------------------
+// FRANCÉS REVISABLE: re-amortiza el saldo al plazo restante cada periodo
+// -----------------------------------------------------------------
+function generarFrancesVariable(monto: number, n: number, rates: number[], valorResidual = 0): Cupon[] {
+  const cupones: Cupon[] = [];
+  let saldo = monto;
+  for (let i = 1; i <= n; i++) {
+    const ip = rates[i - 1];
+    const restantes = n - i + 1;
+    const interes = rd(saldo * ip);
+    let capital: number;
+    if (i === n) {
+      capital = rd(saldo - valorResidual);
+    } else {
+      // Re-amortize: compute payment that amortizes (saldo - VR_PV) over remaining periods at current rate
+      const vrPV = valorResidual * Math.pow(1 + ip, -restantes);
+      const montoAmort = saldo - vrPV;
+      const pago = ip === 0 ? montoAmort / restantes : (montoAmort * ip) / (1 - Math.pow(1 + ip, -restantes));
+      capital = rd(pago - interes);
+    }
+    const saldoFinal = Math.max(0, rd(saldo - capital));
+    cupones.push({ numero_cupon: i, fecha_pago: "", saldo_inicial: rd(saldo), capital, interes, pago_total: rd(capital + interes), saldo_final: saldoFinal });
+    saldo = saldoFinal;
+  }
+  return cupones;
+}
+
+// -----------------------------------------------------------------
+// LINEAL REVISABLE: capital constante, interés por tasa del periodo
+// -----------------------------------------------------------------
+function generarLinealVariable(monto: number, n: number, rates: number[], valorResidual = 0): Cupon[] {
+  const cupones: Cupon[] = [];
+  const capitalFijo = (monto - valorResidual) / n;
+  let saldo = monto;
+  for (let i = 1; i <= n; i++) {
+    const ip = rates[i - 1];
+    const interes = rd(saldo * ip);
+    const capital = i === n ? rd(saldo - valorResidual) : rd(capitalFijo);
+    const saldoFinal = Math.max(0, rd(saldo - capital));
+    cupones.push({ numero_cupon: i, fecha_pago: "", saldo_inicial: rd(saldo), capital, interes, pago_total: rd(capital + interes), saldo_final: saldoFinal });
+    saldo = saldoFinal;
+  }
+  return cupones;
+}
+
+// -----------------------------------------------------------------
+// BULLET REVISABLE: interés por tasa del periodo, capital al final
+// -----------------------------------------------------------------
+function generarBulletVariable(monto: number, n: number, rates: number[]): Cupon[] {
+  const cupones: Cupon[] = [];
+  let saldo = monto;
+  for (let i = 1; i <= n; i++) {
+    const ip = rates[i - 1];
+    const interes = rd(saldo * ip);
+    const capital = i === n ? rd(saldo) : 0;
+    const saldoFinal = Math.max(0, rd(saldo - capital));
+    cupones.push({ numero_cupon: i, fecha_pago: "", saldo_inicial: rd(saldo), capital, interes, pago_total: rd(capital + interes), saldo_final: saldoFinal });
     saldo = saldoFinal;
   }
   return cupones;

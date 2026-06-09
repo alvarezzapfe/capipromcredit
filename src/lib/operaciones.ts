@@ -280,5 +280,15 @@ export function construirOperacion(input: InputOperacion): ResultadoOperacion {
     creditoRow.valor_residual = vrNum;
   }
 
+  // For variable-rate credits, stamp each coupon with the origin rate
+  if (input.tipo_tasa === "variable") {
+    const valRef = (input.valor_referencia_pct ?? 0) / 100; // decimal
+    const tasaAplicada = tasaFinal; // already decimal
+    for (const c of tabla) {
+      c.valor_referencia = valRef;
+      c.tasa_aplicada = tasaAplicada;
+    }
+  }
+
   return { creditoRow, cupones: tabla, disposicionMonto: capitalBase };
 }

@@ -177,6 +177,8 @@ export default function Cartera() {
           credito_id: c.id, numero_cupon: cup.numero_cupon, fecha_pago: cup.fecha_pago,
           saldo_inicial: cup.saldo_inicial, capital: cup.capital, interes: cup.interes,
           pago_total: cup.pago_total, saldo_final: cup.saldo_final,
+          ...(cup.valor_referencia != null ? { valor_referencia: cup.valor_referencia } : {}),
+          ...(cup.tasa_aplicada != null ? { tasa_aplicada: cup.tasa_aplicada } : {}),
         })));
         if (errAmort) { errores++; continue; }
 
@@ -505,6 +507,8 @@ function ModalImportar({ isMobile, onClose, onDone }: { isMobile?: boolean; onCl
             credito_id: credito.id, numero_cupon: c.numero_cupon, fecha_pago: c.fecha_pago,
             saldo_inicial: c.saldo_inicial, capital: c.capital, interes: c.interes,
             pago_total: c.pago_total, saldo_final: c.saldo_final,
+            ...(c.valor_referencia != null ? { valor_referencia: c.valor_referencia } : {}),
+            ...(c.tasa_aplicada != null ? { tasa_aplicada: c.tasa_aplicada } : {}),
           })));
           if (errAmort) throw new Error("amortizacion: " + errAmort.message);
         }
@@ -841,7 +845,7 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
       } else {
         await supabase.from("disposiciones").insert({ credito_id: credito.id, numero: 1, monto: disposicionMonto, fecha: form.fecha_origen });
       }
-      await supabase.from("amortizacion").insert(cupones.map((c) => ({ credito_id: credito.id, numero_cupon: c.numero_cupon, fecha_pago: c.fecha_pago, saldo_inicial: c.saldo_inicial, capital: c.capital, interes: c.interes, pago_total: c.pago_total, saldo_final: c.saldo_final })));
+      await supabase.from("amortizacion").insert(cupones.map((c) => ({ credito_id: credito.id, numero_cupon: c.numero_cupon, fecha_pago: c.fecha_pago, saldo_inicial: c.saldo_inicial, capital: c.capital, interes: c.interes, pago_total: c.pago_total, saldo_final: c.saldo_final, ...(c.valor_referencia != null ? { valor_referencia: c.valor_referencia } : {}), ...(c.tasa_aplicada != null ? { tasa_aplicada: c.tasa_aplicada } : {}) })));
     }
     await supabase.from("bitacora").insert({ entidad: "credito", entidad_id: credito.id, accion: "creado", detalle: { folio: creditoRow.folio, tipo: tipoProducto, monto: creditoRow.monto ?? creditoRow.limite_linea, cupones: cupones.length }, usuario: operador });
     setGuardando(false);
@@ -1156,6 +1160,7 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
   const [estatus, setEstatus] = useState(credito.estatus);
   const [guardando, setGuardando] = useState(false);
   const [mostrarConfirmElim, setMostrarConfirmElim] = useState(false);
+  const [mostrarRevisarTasas, setMostrarRevisarTasas] = useState(false);
   // Revolvente: forms for new movements
   const [movForm, setMovForm] = useState({ tipo: "disposicion" as "disposicion" | "pago", monto: "", fecha: new Date().toISOString().slice(0, 10), nota: "" });
   const [movError, setMovError] = useState<string | null>(null);
@@ -1402,18 +1407,32 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
         })()}
 
         {/* Non-revolvente: amortization + trazabilidad */}
-        {!esRev && <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.4fr 1fr", gap: isMobile ? 16 : 24 }}>
+        {!esRev && (() => {
+          const esVariable = credito.tipo_tasa === "variable";
+          const spreadDec = Number(credito.spread_pp ?? 0);
+          return (
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.4fr 1fr", gap: isMobile ? 16 : 24 }}>
           <div>
-            <h3 style={{ fontSize: 16, fontWeight: 600, color: "#0a1628", marginBottom: 12 }}>{credito.tipo_producto === "factoraje" ? "Cupón de liquidación" : "Tabla de amortización"}</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 600, color: "#0a1628" }}>{credito.tipo_producto === "factoraje" ? "Cupón de liquidación" : "Tabla de amortización"}</h3>
+              {esVariable && !readOnly && (
+                <button className="btn btn-ghost" onClick={() => setMostrarRevisarTasas(true)} style={{ fontSize: 12, padding: "6px 12px", color: "var(--amber)" }}>Revisar tasas</button>
+              )}
+            </div>
             <div className="panel" style={{ overflow: "hidden", maxHeight: 420, overflowY: "auto" }}>
+              <div style={{ overflowX: "auto" }}>
               <table className="table" style={{ fontSize: 12.5 }}>
-                <thead><tr><th>#</th><th>Fecha</th><th style={{ textAlign: "right" }}>Pago</th><th style={{ textAlign: "right" }}>Saldo</th>{!readOnly && <th></th>}</tr></thead>
-                <tbody>{amort.map((c) => {
+                <thead><tr><th>#</th><th>Fecha</th>{esVariable && <><th style={{ textAlign: "right" }}>TIIE %</th><th style={{ textAlign: "right" }}>Tasa %</th></>}<th style={{ textAlign: "right" }}>Pago</th><th style={{ textAlign: "right" }}>Saldo</th>{!readOnly && <th></th>}</tr></thead>
+                <tbody>{amort.map((c: any) => {
                   const vencido = !c.pagado && c.fecha_pago < hoy;
                   return (
                     <tr key={c.id} style={{ opacity: c.pagado ? 0.55 : 1 }}>
                       <td className="mono">{c.numero_cupon}</td>
                       <td style={{ color: vencido ? "var(--red)" : "inherit" }}>{fecha(c.fecha_pago)}</td>
+                      {esVariable && <>
+                        <td className="mono" style={{ textAlign: "right", fontSize: 11.5, color: "var(--text-dim)" }}>{c.valor_referencia != null ? (Number(c.valor_referencia) * 100).toFixed(2) : "—"}</td>
+                        <td className="mono" style={{ textAlign: "right", fontSize: 11.5 }}>{c.tasa_aplicada != null ? (Number(c.tasa_aplicada) * 100).toFixed(2) : "—"}</td>
+                      </>}
                       <td className="mono" style={{ textAlign: "right" }}>{mxn(Number(c.pago_total))}</td>
                       <td className="mono" style={{ textAlign: "right", color: "var(--text-dim)" }}>{mxn(Number(c.saldo_final))}</td>
                       {!readOnly && <td style={{ textAlign: "right" }}><button onClick={() => marcarPagado(c.id, !c.pagado)} className="btn btn-ghost" style={{ padding: "4px 9px", fontSize: 11 }}>{c.pagado ? "✓ Pagado" : "Marcar"}</button></td>}
@@ -1421,14 +1440,154 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
                   );
                 })}</tbody>
               </table>
+              </div>
             </div>
           </div>
           <TrazabilidadPanel bitacora={bitacora} />
-        </div>}
+        </div>);
+        })()}
       </div>
     </Overlay>
     {mostrarConfirmElim && <ModalConfirmarEliminacion credito={credito} onClose={() => setMostrarConfirmElim(false)} onDeleted={onDeleted} />}
+    {mostrarRevisarTasas && <ModalRevisarTasas credito={credito} amort={amort} isMobile={isMobile} onClose={() => setMostrarRevisarTasas(false)} onSaved={() => { setMostrarRevisarTasas(false); cargar(); onChanged(); }} />}
     </>
+  );
+}
+
+// =====================================================================
+// MODAL: Revisar tasas (variable)
+// =====================================================================
+function ModalRevisarTasas({ credito, amort, isMobile, onClose, onSaved }: { credito: Credito; amort: any[]; isMobile?: boolean; onClose: () => void; onSaved: () => void }) {
+  const spreadDec = Number(credito.spread_pp ?? 0); // decimal e.g. 0.045
+  const ppa = ({ mensual: 12, quincenal: 24, semanal: 52 } as Record<string, number>)[credito.frecuencia] ?? 12;
+
+  // State: editable TIIE% for each period (as percentage string, e.g. "10.50")
+  const [tasas, setTasas] = useState<string[]>(() =>
+    amort.map((c: any) => c.valor_referencia != null ? (Number(c.valor_referencia) * 100).toFixed(2) : ((Number(credito.tasa_anual) - spreadDec) * 100).toFixed(2))
+  );
+  const [desdeIdx, setDesdeIdx] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
+
+  function aplicarDesde(idx: number, valor: string) {
+    const nueva = [...tasas];
+    for (let i = idx; i < nueva.length; i++) nueva[i] = valor;
+    setTasas(nueva);
+    setDesdeIdx(idx);
+  }
+
+  async function guardar() {
+    setError(null);
+    // Validate
+    for (let i = 0; i < tasas.length; i++) {
+      const v = Number(tasas[i]);
+      if (isNaN(v) || v < 0) { setError(`Periodo ${i + 1}: TIIE inválida.`); return; }
+    }
+
+    // Build tasasAnualesPorPeriodo (TIIE% + spread in decimal) for the motor
+    const tasasAnuales = tasas.map(t => (Number(t) / 100) + spreadDec);
+
+    // Use the motor to regenerate the full schedule
+    const esArr = credito.tipo_producto === "arrendamiento_financiero" || credito.tipo_producto === "arrendamiento_puro";
+    const graciaNum = Number(credito.periodo_gracia_meses) || 0;
+    const freq = (credito.frecuencia || "mensual") as Frecuencia;
+    const metodo = (credito.metodo_amort || "frances") as MetodoAmort;
+    const vrNum = esArr ? Number(credito.valor_residual ?? 0) : 0;
+
+    let nuevos: import("@/lib/amortizacion").Cupon[];
+    try {
+      nuevos = generarTablaAmortizacion({
+        monto: Number(credito.monto),
+        tasaAnual: tasasAnuales[0], // fallback
+        plazoMeses: Number(credito.plazo_meses),
+        frecuencia: freq,
+        metodo,
+        fechaOrigen: credito.fecha_origen,
+        graciaPeridos: graciaNum > 0 ? calcularGraciaPeridos(graciaNum, freq) : 0,
+        tipoGracia: graciaNum > 0 ? (credito.tipo_gracia as TipoGracia) : "ninguna",
+        valorResidual: vrNum,
+        tasasAnualesPorPeriodo: tasasAnuales,
+      });
+    } catch (e: any) {
+      setError("Error al recalcular: " + e.message);
+      return;
+    }
+
+    // Stamp valor_referencia and tasa_aplicada on each new cupon
+    for (let i = 0; i < nuevos.length; i++) {
+      nuevos[i].valor_referencia = Number(tasas[i] ?? tasas[tasas.length - 1]) / 100;
+      nuevos[i].tasa_aplicada = (Number(tasas[i] ?? tasas[tasas.length - 1]) / 100) + spreadDec;
+    }
+
+    // Match new cupones to existing amort rows by numero_cupon
+    setGuardando(true);
+    const supabase = createClient();
+    const { data: userData } = await supabase.auth.getUser();
+    const operador = userData.user?.email ?? "sistema";
+
+    let updated = 0;
+    for (const nc of nuevos) {
+      const existing = amort.find((a: any) => a.numero_cupon === nc.numero_cupon);
+      if (!existing) continue;
+      const { error: errUpd } = await supabase.from("amortizacion").update({
+        saldo_inicial: nc.saldo_inicial, capital: nc.capital, interes: nc.interes,
+        pago_total: nc.pago_total, saldo_final: nc.saldo_final,
+        valor_referencia: nc.valor_referencia, tasa_aplicada: nc.tasa_aplicada,
+      }).eq("id", existing.id);
+      if (!errUpd) updated++;
+    }
+
+    await supabase.from("bitacora").insert({
+      entidad: "credito", entidad_id: credito.id, accion: "revision_tasa",
+      detalle: { cupones_actualizados: updated, desde_periodo: (desdeIdx ?? 0) + 1 },
+      usuario: operador,
+    });
+
+    setGuardando(false);
+    onSaved();
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(10,22,40,0.55)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", zIndex: 200, padding: 24, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} className="panel" style={{ width: "100%", maxWidth: 620, padding: isMobile ? "20px 16px" : "28px 28px", maxHeight: "90vh", overflowY: "auto" }}>
+        <h3 style={{ fontSize: 18, fontWeight: 600, color: "#0a1628", marginBottom: 4 }}>Revisar tasas</h3>
+        <p style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 16 }}>
+          Edita la TIIE de un periodo. Usa "Aplicar desde aquí" para cambiar ese periodo y todos los siguientes. Spread: <strong className="mono">{(spreadDec * 100).toFixed(2)}pp</strong>
+        </p>
+
+        <div style={{ maxHeight: 400, overflowY: "auto", marginBottom: 16 }}>
+          <table className="table" style={{ fontSize: 12.5 }}>
+            <thead><tr><th>#</th><th>Fecha</th><th style={{ textAlign: "right" }}>TIIE %</th><th style={{ textAlign: "right" }}>Tasa %</th><th></th></tr></thead>
+            <tbody>
+              {amort.map((c: any, i: number) => {
+                const tiieVal = Number(tasas[i] ?? 0);
+                const tasaApl = tiieVal + (spreadDec * 100);
+                return (
+                  <tr key={c.id}>
+                    <td className="mono">{c.numero_cupon}</td>
+                    <td style={{ fontSize: 11.5 }}>{fecha(c.fecha_pago)}</td>
+                    <td style={{ textAlign: "right" }}>
+                      <input className="input mono" type="number" step="0.01" value={tasas[i]} onChange={(e) => { const n = [...tasas]; n[i] = e.target.value; setTasas(n); }} style={{ width: 80, padding: "4px 6px", fontSize: 12, textAlign: "right" }} />
+                    </td>
+                    <td className="mono" style={{ textAlign: "right", fontSize: 11.5, color: "var(--text-dim)" }}>{tasaApl.toFixed(2)}</td>
+                    <td>
+                      <button className="btn btn-ghost" onClick={() => aplicarDesde(i, tasas[i])} style={{ padding: "3px 8px", fontSize: 10.5, whiteSpace: "nowrap" }}>Desde aquí ↓</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {error && <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "10px 14px", borderRadius: 6, fontSize: 13, marginBottom: 12 }}>{error}</div>}
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-primary" onClick={guardar} disabled={guardando}>{guardando ? "Recalculando…" : "Guardar y recalcular"}</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
