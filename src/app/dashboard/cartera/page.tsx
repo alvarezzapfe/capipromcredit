@@ -86,6 +86,8 @@ export default function Cartera() {
   const [detalle, setDetalle] = useState<Credito | null>(null);
   const [avisoElim, setAvisoElim] = useState<string | null>(null);
   const [elimDesdeTabla, setElimDesdeTabla] = useState<Credito | null>(null);
+  const [reparando, setReparando] = useState(false);
+  const [avisoRepair, setAvisoRepair] = useState<string | null>(null);
   const showTableDelete = puedeEliminarDesdeTabla(rol);
 
   const [saldosRev, setSaldosRev] = useState<Record<string, number>>({});
@@ -116,6 +118,86 @@ export default function Cartera() {
 
   useEffect(() => { cargar(); }, [cargar]);
 
+  async function repararAmortizacion() {
+    setReparando(true);
+    setAvisoRepair(null);
+    const supabase = createClient();
+    const { data: userData } = await supabase.auth.getUser();
+    const operador = userData.user?.email ?? "sistema";
+
+    const { data: todos } = await supabase.from("creditos").select("*").neq("tipo_producto", "linea_revolvente");
+    if (!todos || todos.length === 0) { setReparando(false); setAvisoRepair("No hay créditos para revisar."); return; }
+
+    let reparados = 0;
+    let errores = 0;
+
+    for (const c of todos) {
+      const { count } = await supabase.from("amortizacion").select("id", { count: "exact", head: true }).eq("credito_id", c.id);
+      if ((count ?? 0) > 0) continue;
+
+      const tp = c.tipo_producto as TipoProducto;
+      const esArr = tp === "arrendamiento_financiero" || tp === "arrendamiento_puro";
+      const esFact = tp === "factoraje";
+
+      const input: InputOperacion = {
+        tipo_producto: tp,
+        folio: c.folio,
+        acreditado: c.acreditado,
+        rfc: c.rfc ?? undefined,
+        fecha_origen: c.fecha_origen,
+        monto: Number(c.monto) || 0,
+        tipo_tasa: c.tipo_tasa === "variable" ? "variable" : "fija",
+        tasa_anual_pct: Number(c.tasa_anual) * 100,
+        tasa_referencia: c.tasa_referencia ?? undefined,
+        valor_referencia_pct: c.valor_referencia != null ? Number(c.valor_referencia) * 100 : 0,
+        spread_pp: c.spread_pp != null ? Number(c.spread_pp) * 100 : 0,
+        plazo_meses: Number(c.plazo_meses) || 0,
+        frecuencia: (c.frecuencia || "mensual") as Frecuencia,
+        metodo_amort: (c.metodo_amort || "frances") as MetodoAmort,
+        tipo_garantia: c.tipo_garantia ?? undefined,
+        periodo_gracia_meses: Number(c.periodo_gracia_meses) || 0,
+        tipo_gracia: (c.tipo_gracia || "ninguna") as TipoGracia,
+        tipo_disposicion: "unica",
+        valor_bien: esArr ? Number(c.valor_bien ?? 0) : 0,
+        enganche: esArr ? Number(c.enganche ?? 0) : 0,
+        valor_residual: esArr ? Number(c.valor_residual ?? 0) : 0,
+        deudor: esFact ? (c.deudor ?? undefined) : undefined,
+        monto_factura: esFact ? Number(c.monto_factura ?? 0) : 0,
+        aforo_pct: esFact ? Number(c.aforo ?? 80) : 80,
+        tasa_descuento_pct: esFact ? Number(c.tasa_descuento ?? 0) : 0,
+        comision_pct: esFact ? Number(c.comision_pct ?? 0) : 0,
+        fecha_vencimiento: esFact ? (c.fecha_vencimiento ?? undefined) : undefined,
+      };
+
+      try {
+        const resultado = construirOperacion(input);
+        if (resultado.cupones.length === 0) continue;
+
+        const { error: errAmort } = await supabase.from("amortizacion").insert(resultado.cupones.map((cup) => ({
+          credito_id: c.id, numero_cupon: cup.numero_cupon, fecha_pago: cup.fecha_pago,
+          saldo_inicial: cup.saldo_inicial, capital: cup.capital, interes: cup.interes,
+          pago_total: cup.pago_total, saldo_final: cup.saldo_final,
+        })));
+        if (errAmort) { errores++; continue; }
+
+        await supabase.from("creditos").update({ tipo_disposicion: "unica" }).eq("id", c.id);
+        await supabase.from("bitacora").insert({ entidad: "credito", entidad_id: c.id, accion: "reparado", detalle: { cupones: resultado.cupones.length }, usuario: operador });
+        reparados++;
+      } catch {
+        errores++;
+      }
+    }
+
+    setReparando(false);
+    cargar();
+    if (reparados === 0 && errores === 0) {
+      setAvisoRepair("Todos los créditos ya tienen amortización. Nada que reparar.");
+    } else {
+      setAvisoRepair(`${reparados} crédito${reparados === 1 ? "" : "s"} reparado${reparados === 1 ? "" : "s"}${errores > 0 ? `, ${errores} con error` : ""}.`);
+    }
+    setTimeout(() => setAvisoRepair(null), 8000);
+  }
+
   return (
     <div style={{ padding: isMobile ? "20px 16px 40px" : "32px 48px 60px" }}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: isMobile ? "flex-start" : "flex-end", marginBottom: isMobile ? 20 : 28, flexWrap: "wrap", gap: 12 }}>
@@ -125,6 +207,9 @@ export default function Cartera() {
         </div>
         {!readOnly && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {rol === "super_admin" && (
+              <button className="btn btn-ghost" onClick={repararAmortizacion} disabled={reparando} style={{ fontSize: 12.5, padding: "8px 14px", color: "var(--amber)" }}>{reparando ? "Reparando…" : "Reparar amortización"}</button>
+            )}
             <button className="btn btn-ghost" onClick={descargarPlantilla} style={{ fontSize: 12.5, padding: "8px 14px" }}><Download size={14} strokeWidth={1.75} /> Plantilla</button>
             <button className="btn btn-ghost" onClick={() => setMostrarImport(true)} style={{ fontSize: 12.5, padding: "8px 14px" }}><Upload size={14} strokeWidth={1.75} /> Importar</button>
             <button className="btn btn-primary" onClick={() => setMostrarAlta(true)}>+ Originar crédito</button>
@@ -132,6 +217,9 @@ export default function Cartera() {
         )}
       </header>
 
+      {avisoRepair && (
+        <div style={{ background: "var(--amber-soft)", color: "var(--amber)", padding: "11px 16px", borderRadius: 6, fontSize: 13.5, marginBottom: 18 }}>{avisoRepair}</div>
+      )}
       {avisoImport && (
         <div style={{ background: "var(--green-soft)", color: "var(--green)", padding: "11px 16px", borderRadius: 6, fontSize: 13.5, marginBottom: 18 }}>{avisoImport}</div>
       )}
@@ -403,22 +491,31 @@ function ModalImportar({ isMobile, onClose, onDone }: { isMobile?: boolean; onCl
       try {
         const { creditoRow, cupones, disposicionMonto } = construirOperacion(fila.input);
 
+        // Force unica for imports
+        creditoRow.tipo_disposicion = "unica";
+
         const { data: credito, error: errCred } = await supabase.from("creditos").insert(creditoRow).select().single();
-        if (errCred || !credito) throw new Error(errCred?.message ?? "Error al insertar crédito");
+        if (errCred || !credito) throw new Error("creditos: " + (errCred?.message ?? "Error"));
 
-        await supabase.from("disposiciones").insert({ credito_id: credito.id, numero: 1, monto: disposicionMonto, fecha: creditoRow.fecha_origen });
+        const { error: errDisp } = await supabase.from("disposiciones").insert({ credito_id: credito.id, numero: 1, monto: disposicionMonto, fecha: creditoRow.fecha_origen });
+        if (errDisp) throw new Error("disposiciones: " + errDisp.message);
 
-        await supabase.from("amortizacion").insert(cupones.map((c) => ({
-          credito_id: credito.id, numero_cupon: c.numero_cupon, fecha_pago: c.fecha_pago,
-          saldo_inicial: c.saldo_inicial, capital: c.capital, interes: c.interes,
-          pago_total: c.pago_total, saldo_final: c.saldo_final,
-        })));
+        if (cupones.length > 0) {
+          const { error: errAmort } = await supabase.from("amortizacion").insert(cupones.map((c) => ({
+            credito_id: credito.id, numero_cupon: c.numero_cupon, fecha_pago: c.fecha_pago,
+            saldo_inicial: c.saldo_inicial, capital: c.capital, interes: c.interes,
+            pago_total: c.pago_total, saldo_final: c.saldo_final,
+          })));
+          if (errAmort) throw new Error("amortizacion: " + errAmort.message);
+        }
 
-        await supabase.from("bitacora").insert({
+        const { error: errBit } = await supabase.from("bitacora").insert({
           entidad: "credito", entidad_id: credito.id, accion: "creado",
           detalle: { origen: "import", folio: creditoRow.folio, tipo: creditoRow.tipo_producto },
           usuario: operador,
         });
+        if (errBit) throw new Error("bitacora: " + errBit.message);
+
         ok++;
       } catch (err: any) {
         fail++;
