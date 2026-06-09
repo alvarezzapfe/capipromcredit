@@ -24,6 +24,7 @@ export default function Flujos() {
   const [cupones, setCupones] = useState<Cupon[]>([]);
   const [cargando, setCargando] = useState(true);
   const [filtro, setFiltro] = useState<"todos" | "vencidos" | "semana" | "mes">("todos");
+  const [ordenAsc, setOrdenAsc] = useState(true);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -40,12 +41,17 @@ export default function Flujos() {
     cargar();
   }, [cargar]);
 
-  const filtrados = cupones.filter((c) => {
-    if (filtro === "vencidos") return c.dias_al_cupon < 0;
-    if (filtro === "semana") return c.dias_al_cupon >= 0 && c.dias_al_cupon <= 7;
-    if (filtro === "mes") return c.dias_al_cupon >= 0 && c.dias_al_cupon <= 30;
-    return true;
-  });
+  const filtrados = cupones
+    .filter((c) => {
+      if (filtro === "vencidos") return c.dias_al_cupon < 0;
+      if (filtro === "semana") return c.dias_al_cupon >= 0 && c.dias_al_cupon <= 7;
+      if (filtro === "mes") return c.dias_al_cupon >= 0 && c.dias_al_cupon <= 30;
+      return true;
+    })
+    .sort((a, b) => ordenAsc
+      ? a.fecha_pago.localeCompare(b.fecha_pago)
+      : b.fecha_pago.localeCompare(a.fecha_pago)
+    );
 
   const totalVencido = cupones.filter((c) => c.dias_al_cupon < 0).reduce((s, c) => s + Number(c.pago_total), 0);
   const totalSemana = cupones.filter((c) => c.dias_al_cupon >= 0 && c.dias_al_cupon <= 7).reduce((s, c) => s + Number(c.pago_total), 0);
@@ -86,7 +92,7 @@ export default function Flujos() {
           <table className="table" style={{ minWidth: 650 }}>
             <thead>
               <tr>
-                <th>Vence</th>
+                <th style={{ cursor: "pointer", userSelect: "none" }} onClick={() => setOrdenAsc(!ordenAsc)}>Vence {ordenAsc ? "↑" : "↓"}</th>
                 <th>Días</th>
                 <th>Folio</th>
                 <th>Acreditado</th>

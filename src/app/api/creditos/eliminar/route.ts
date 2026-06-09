@@ -35,22 +35,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Crédito no encontrado" }, { status: 404 });
   }
 
-  // Business rule: cannot delete liquidated credits
-  if (credito.estatus === "liquidado") {
+  // Business rule: cannot delete liquidated credits (unless super_admin)
+  if (credito.estatus === "liquidado" && caller.rol !== "super_admin") {
     return NextResponse.json(
       { error: "No se pueden eliminar créditos liquidados (auditoría regulatoria)" },
       { status: 400 }
     );
   }
 
-  // Business rule: cannot delete credits with registered payments
+  // Business rule: cannot delete credits with registered payments (unless super_admin)
   const { count: pagoCount } = await admin
     .from("amortizacion")
     .select("id", { count: "exact", head: true })
     .eq("credito_id", creditoId)
     .eq("pagado", true);
 
-  if ((pagoCount ?? 0) > 0) {
+  if ((pagoCount ?? 0) > 0 && caller.rol !== "super_admin") {
     return NextResponse.json(
       {
         error:
@@ -73,11 +73,17 @@ export async function POST(request: Request) {
       motivo,
       eliminado_por: caller.email,
       eliminado_por_rol: caller.rol,
+      forzado: caller.rol === "super_admin" && ((pagoCount ?? 0) > 0 || credito.estatus === "liquidado"),
     },
     usuario: caller.email,
   });
 
-  // Delete credit (amortizacion rows cascade automatically via FK)
+  // Delete child rows explicitly (in case FK CASCADE is not set up)
+  await admin.from("amortizacion").delete().eq("credito_id", creditoId);
+  await admin.from("disposiciones").delete().eq("credito_id", creditoId);
+  await admin.from("movimientos_linea").delete().eq("credito_id", creditoId);
+
+  // Delete credit
   const { error: delErr } = await admin
     .from("creditos")
     .delete()
