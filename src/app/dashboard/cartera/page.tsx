@@ -36,6 +36,7 @@ interface Credito {
   tipo_gracia: string;
   tipo_disposicion: string;
   tipo_producto: TipoProducto;
+  credito_origen_id: string | null;
   limite_linea: number | null;
   valor_bien: number | null;
   enganche: number | null;
@@ -1161,6 +1162,7 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
   const [guardando, setGuardando] = useState(false);
   const [mostrarConfirmElim, setMostrarConfirmElim] = useState(false);
   const [mostrarRevisarTasas, setMostrarRevisarTasas] = useState(false);
+  const [mostrarReestructura, setMostrarReestructura] = useState(false);
   // Revolvente: forms for new movements
   const [movForm, setMovForm] = useState({ tipo: "disposicion" as "disposicion" | "pago", monto: "", fecha: new Date().toISOString().slice(0, 10), nota: "" });
   const [movError, setMovError] = useState<string | null>(null);
@@ -1219,10 +1221,18 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
             <h2 style={{ fontSize: 22, fontWeight: 600, color: "#0a1628", marginTop: 4 }}>{credito.acreditado}</h2>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {!readOnly && !esRev && ["vigente", "en_mora"].includes(credito.estatus) && (
+              <button className="btn btn-ghost" onClick={() => setMostrarReestructura(true)} style={{ padding: "8px 14px", fontSize: 12.5, color: "var(--amber)" }}>Reestructurar</button>
+            )}
             {canDelete && <button className="btn btn-danger" onClick={() => setMostrarConfirmElim(true)} style={{ padding: "8px 14px", fontSize: 12.5 }}><Trash2 size={14} strokeWidth={1.75} /> Eliminar</button>}
             <button className="btn btn-ghost" onClick={onClose} style={{ padding: "8px 14px" }}>✕</button>
           </div>
         </div>
+
+        {/* Origen de reestructura */}
+        {credito.credito_origen_id && (
+          <div style={{ fontSize: 12.5, color: "var(--amber)", marginBottom: 8 }}>Reestructura de crédito anterior</div>
+        )}
 
         {/* Parametrización */}
         <div style={{ marginBottom: 6 }}>
@@ -1450,7 +1460,222 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
     </Overlay>
     {mostrarConfirmElim && <ModalConfirmarEliminacion credito={credito} onClose={() => setMostrarConfirmElim(false)} onDeleted={onDeleted} />}
     {mostrarRevisarTasas && <ModalRevisarTasas credito={credito} amort={amort} isMobile={isMobile} onClose={() => setMostrarRevisarTasas(false)} onSaved={() => { setMostrarRevisarTasas(false); cargar(); onChanged(); }} />}
+    {mostrarReestructura && <ModalReestructura credito={credito} amort={amort} isMobile={isMobile} onClose={() => setMostrarReestructura(false)} onDone={() => { setMostrarReestructura(false); onClose(); onChanged(); }} />}
     </>
+  );
+}
+
+// =====================================================================
+// MODAL: Reestructura
+// =====================================================================
+function ModalReestructura({ credito, amort, isMobile, onClose, onDone }: { credito: Credito; amort: any[]; isMobile?: boolean; onClose: () => void; onDone: () => void }) {
+  const hoyStr = new Date().toISOString().slice(0, 10);
+  const [fechaReest, setFechaReest] = useState(hoyStr);
+  const [capitalizar, setCapitalizar] = useState(false);
+  const [form, setForm] = useState({
+    tipo_tasa: credito.tipo_tasa as "fija" | "variable",
+    tasa_anual: ((Number(credito.tasa_anual) || 0) * 100).toFixed(2),
+    tasa_referencia: credito.tasa_referencia ?? "TIIE_28",
+    valor_referencia: credito.valor_referencia != null ? (Number(credito.valor_referencia) * 100).toFixed(2) : "",
+    spread_pp: credito.spread_pp != null ? (Number(credito.spread_pp) * 100).toFixed(2) : "",
+    plazo_meses: "",
+    frecuencia: (credito.frecuencia || "mensual") as Frecuencia,
+    metodo_amort: (credito.metodo_amort || "frances") as MetodoAmort,
+    tipo_garantia: credito.tipo_garantia || "quirografaria",
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
+
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  // Calculate saldo at restructure date
+  const cuponesOrdenados = [...amort].sort((a: any, b: any) => a.numero_cupon - b.numero_cupon);
+  let saldoBase = 0;
+  const primerCuponFuturo = cuponesOrdenados.find((c: any) => c.fecha_pago >= fechaReest);
+  if (primerCuponFuturo) {
+    saldoBase = Number(primerCuponFuturo.saldo_inicial);
+  } else if (cuponesOrdenados.length > 0) {
+    saldoBase = Number(cuponesOrdenados[cuponesOrdenados.length - 1].saldo_final);
+  }
+
+  // Capitalize overdue unpaid interest
+  let interesesVencidos = 0;
+  if (capitalizar) {
+    cuponesOrdenados.forEach((c: any) => {
+      if (c.fecha_pago < fechaReest && !c.pagado) {
+        interesesVencidos += Number(c.interes);
+      }
+    });
+  }
+  interesesVencidos = Math.round(interesesVencidos * 100) / 100;
+  const saldoTotal = Math.round((saldoBase + interesesVencidos) * 100) / 100;
+
+  // Preview
+  const tasaEfectiva = form.tipo_tasa === "variable"
+    ? (Number(form.valor_referencia) || 0) + (Number(form.spread_pp) || 0)
+    : Number(form.tasa_anual) || 0;
+
+  let preview: ReturnType<typeof generarTablaAmortizacion> = [];
+  let previewErr: string | null = null;
+  if (saldoTotal > 0 && tasaEfectiva > 0 && Number(form.plazo_meses) > 0) {
+    try {
+      preview = generarTablaAmortizacion({
+        monto: saldoTotal,
+        tasaAnual: tasaEfectiva / 100,
+        plazoMeses: Number(form.plazo_meses),
+        frecuencia: form.frecuencia,
+        metodo: form.metodo_amort,
+        fechaOrigen: fechaReest,
+      });
+    } catch (e: any) { previewErr = e.message; }
+  }
+
+  async function confirmar() {
+    setError(null);
+    if (saldoTotal <= 0) { setError("No hay saldo para reestructurar."); return; }
+    if (tasaEfectiva <= 0) { setError("La tasa debe ser mayor a 0."); return; }
+    if (!form.plazo_meses || Number(form.plazo_meses) <= 0) { setError("Ingresa el nuevo plazo."); return; }
+
+    const input: InputOperacion = {
+      tipo_producto: credito.tipo_producto,
+      folio: credito.folio + "-R",
+      acreditado: credito.acreditado,
+      rfc: credito.rfc ?? undefined,
+      fecha_origen: fechaReest,
+      monto: saldoTotal,
+      tipo_tasa: form.tipo_tasa,
+      tasa_anual_pct: form.tipo_tasa === "fija" ? Number(form.tasa_anual) : 0,
+      tasa_referencia: form.tipo_tasa === "variable" ? form.tasa_referencia : undefined,
+      valor_referencia_pct: form.tipo_tasa === "variable" ? Number(form.valor_referencia) : 0,
+      spread_pp: form.tipo_tasa === "variable" ? Number(form.spread_pp) : 0,
+      plazo_meses: Number(form.plazo_meses),
+      frecuencia: form.frecuencia,
+      metodo_amort: form.metodo_amort,
+      tipo_garantia: form.tipo_garantia,
+      periodo_gracia_meses: 0,
+      tipo_gracia: "ninguna",
+      tipo_disposicion: "unica",
+    };
+
+    let resultado: ResultadoOperacion;
+    try { resultado = construirOperacion(input); } catch (e: any) { setError(e.message); return; }
+
+    setGuardando(true);
+    const supabase = createClient();
+    const { data: userData } = await supabase.auth.getUser();
+    const operador = userData.user?.email ?? "sistema";
+
+    // Set credito_origen_id on the new credit
+    resultado.creditoRow.credito_origen_id = credito.id;
+
+    const { data: nuevo, error: errIns } = await supabase.from("creditos").insert(resultado.creditoRow).select().single();
+    if (errIns || !nuevo) { setGuardando(false); setError("Error al crear crédito: " + (errIns?.message ?? "")); return; }
+
+    // Disposición
+    await supabase.from("disposiciones").insert({ credito_id: nuevo.id, numero: 1, monto: saldoTotal, fecha: fechaReest });
+
+    // Amortización
+    if (resultado.cupones.length > 0) {
+      await supabase.from("amortizacion").insert(resultado.cupones.map((c) => ({
+        credito_id: nuevo.id, numero_cupon: c.numero_cupon, fecha_pago: c.fecha_pago,
+        saldo_inicial: c.saldo_inicial, capital: c.capital, interes: c.interes,
+        pago_total: c.pago_total, saldo_final: c.saldo_final,
+        ...(c.valor_referencia != null ? { valor_referencia: c.valor_referencia } : {}),
+        ...(c.tasa_aplicada != null ? { tasa_aplicada: c.tasa_aplicada } : {}),
+      })));
+    }
+
+    // Update old credit
+    await supabase.from("creditos").update({ estatus: "reestructurado" }).eq("id", credito.id);
+
+    // Bitácora
+    await supabase.from("bitacora").insert([
+      { entidad: "credito", entidad_id: credito.id, accion: "reestructurado", detalle: { nuevo_folio: resultado.creditoRow.folio, saldo: saldoTotal, intereses_capitalizados: interesesVencidos }, usuario: operador },
+      { entidad: "credito", entidad_id: nuevo.id, accion: "creado", detalle: { origen: "reestructura", folio_origen: credito.folio, monto: saldoTotal }, usuario: operador },
+    ]);
+
+    setGuardando(false);
+    onDone();
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(10,22,40,0.55)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", zIndex: 200, padding: 24, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} className="panel" style={{ width: "100%", maxWidth: 720, padding: isMobile ? "20px 16px" : "28px 28px", maxHeight: "90vh", overflowY: "auto" }}>
+        <h3 style={{ fontSize: 18, fontWeight: 600, color: "#0a1628", marginBottom: 4 }}>Reestructurar crédito</h3>
+        <p style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 16 }}>
+          Se creará un crédito nuevo con el saldo insoluto y los términos que definas. El crédito original quedará en estatus "Reestructurado".
+        </p>
+
+        {/* Saldo */}
+        <div style={{ background: "var(--amber-soft)", padding: "14px 18px", borderRadius: 8, marginBottom: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12, marginBottom: 10 }}>
+            <div className="field"><label>Fecha de reestructura</label><input className="input mono" type="date" value={fechaReest} onChange={(e) => setFechaReest(e.target.value)} /></div>
+            <div>
+              <div style={{ fontSize: 11, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Saldo a reestructurar</div>
+              <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: "var(--amber)", marginTop: 2 }}>{mxn(saldoTotal)}</div>
+            </div>
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+            <input type="checkbox" checked={capitalizar} onChange={(e) => setCapitalizar(e.target.checked)} />
+            Capitalizar intereses vencidos no pagados {capitalizar && interesesVencidos > 0 && <span className="mono" style={{ color: "var(--text-dim)" }}>+{mxn(interesesVencidos)}</span>}
+          </label>
+        </div>
+
+        {/* Nuevos términos */}
+        <div style={{ display: "grid", gap: 12, marginBottom: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="field"><label>Nuevo plazo (meses) *</label><input className="input mono" type="number" value={form.plazo_meses} onChange={(e) => set("plazo_meses", e.target.value)} placeholder="12" /></div>
+            <div className="field"><label>Frecuencia</label><select className="select" value={form.frecuencia} onChange={(e) => set("frecuencia", e.target.value)}><option value="mensual">Mensual</option><option value="quincenal">Quincenal</option><option value="semanal">Semanal</option></select></div>
+          </div>
+
+          <div className="field">
+            <label>Tipo de tasa</label>
+            <div style={{ display: "flex", gap: 6 }}>
+              {(["fija", "variable"] as const).map((t) => (
+                <button key={t} onClick={() => set("tipo_tasa", t)} style={{ flex: 1, padding: "8px 0", fontSize: 13, fontFamily: "inherit", fontWeight: form.tipo_tasa === t ? 600 : 400, border: form.tipo_tasa === t ? "1px solid var(--amber)" : "1px solid var(--line)", borderRadius: 6, background: form.tipo_tasa === t ? "var(--amber-soft)" : "transparent", color: form.tipo_tasa === t ? "var(--amber)" : "var(--text-dim)", cursor: "pointer" }}>
+                  {t === "fija" ? "Fija" : "Variable"}
+                </button>
+              ))}
+            </div>
+          </div>
+          {form.tipo_tasa === "fija" ? (
+            <div className="field"><label>Tasa anual (%) *</label><input className="input mono" type="number" value={form.tasa_anual} onChange={(e) => set("tasa_anual", e.target.value)} placeholder="24" /></div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+              <div className="field"><label>Referencia</label><select className="select" value={form.tasa_referencia} onChange={(e) => set("tasa_referencia", e.target.value)}><option value="TIIE_28">TIIE 28d</option><option value="TIIE_91">TIIE 91d</option><option value="TIIE_182">TIIE 182d</option></select></div>
+              <div className="field"><label>Valor ref (%)</label><input className="input mono" type="number" value={form.valor_referencia} onChange={(e) => set("valor_referencia", e.target.value)} placeholder="10.50" /></div>
+              <div className="field"><label>Spread (pp)</label><input className="input mono" type="number" value={form.spread_pp} onChange={(e) => set("spread_pp", e.target.value)} placeholder="4.50" /></div>
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="field"><label>Método</label><select className="select" value={form.metodo_amort} onChange={(e) => set("metodo_amort", e.target.value)}><option value="frances">Francés</option><option value="lineal">Lineal</option><option value="bullet">Bullet</option></select></div>
+            <div className="field"><label>Garantía</label><select className="select" value={form.tipo_garantia} onChange={(e) => set("tipo_garantia", e.target.value)}><option value="quirografaria">Quirografaria</option><option value="fideicomiso_flujo">Fideicomiso</option><option value="derecho_cobro">Der. cobro</option><option value="bien_arrendado">Bien arrendado</option></select></div>
+          </div>
+        </div>
+
+        {/* Preview */}
+        {preview.length > 0 && (
+          <div style={{ background: "#f4f6f8", borderRadius: 8, padding: "14px 16px", marginBottom: 16, maxHeight: 220, overflowY: "auto" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>{preview.length} cupones · primer pago {mxn(preview[0].pago_total)}</div>
+            <table className="table" style={{ fontSize: 11.5 }}>
+              <thead><tr><th>#</th><th>Fecha</th><th style={{ textAlign: "right" }}>Pago</th><th style={{ textAlign: "right" }}>Saldo</th></tr></thead>
+              <tbody>{preview.map((c) => (
+                <tr key={c.numero_cupon}><td className="mono">{c.numero_cupon}</td><td>{fecha(c.fecha_pago)}</td><td className="mono" style={{ textAlign: "right" }}>{mxn(c.pago_total)}</td><td className="mono" style={{ textAlign: "right", color: "var(--text-dim)" }}>{mxn(c.saldo_final)}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+        {previewErr && <div style={{ color: "var(--red)", fontSize: 13, marginBottom: 12 }}>{previewErr}</div>}
+
+        {error && <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "10px 14px", borderRadius: 6, fontSize: 13, marginBottom: 12 }}>{error}</div>}
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-primary" onClick={confirmar} disabled={guardando || saldoTotal <= 0}>{guardando ? "Reestructurando…" : "Confirmar reestructura"}</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

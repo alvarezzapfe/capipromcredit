@@ -24,6 +24,7 @@ export const ESTATUS_CREDITO = [
   "vencido",
   "liquidado",
   "cancelado",
+  "reestructurado",
 ] as const;
 
 export const ESTATUS_SOLICITUD = [
@@ -40,6 +41,7 @@ export const labelEstatus: Record<string, string> = {
   vencido: "Vencido",
   liquidado: "Liquidado",
   cancelado: "Cancelado",
+  reestructurado: "Reestructurado",
   nueva: "Nueva",
   en_revision: "En revisión",
   aprobada: "Aprobada",

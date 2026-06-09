@@ -68,8 +68,15 @@ export default function Resumen() {
       const cupones = (cuponesRes.data ?? []) as CuponView[];
       const amort = (amortRes.data ?? []) as AmortMin[];
 
+      // Only count saldo for active credits (vigente/en_mora)
+      const activosSet = new Set(
+        creditos.filter((c: any) => ["vigente", "en_mora"].includes(c.estatus)).map((c: any) => c.id)
+      );
       const saldoPorCredito = new Map<string, number>();
-      amort.forEach((a) => { if (!saldoPorCredito.has(a.credito_id)) saldoPorCredito.set(a.credito_id, Number(a.saldo_inicial)); });
+      amort.forEach((a) => {
+        if (!activosSet.has(a.credito_id)) return;
+        if (!saldoPorCredito.has(a.credito_id)) saldoPorCredito.set(a.credito_id, Number(a.saldo_inicial));
+      });
       let saldoTotal = 0;
       saldoPorCredito.forEach((v) => (saldoTotal += v));
 
