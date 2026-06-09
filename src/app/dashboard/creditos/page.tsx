@@ -31,6 +31,8 @@ export default function Solicitudes() {
   const [cargando, setCargando] = useState(true);
   const [filtro, setFiltro] = useState<string>("todas");
 
+  const [errCambio, setErrCambio] = useState<string | null>(null);
+
   // Modal nueva solicitud
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(formVacio);
@@ -55,8 +57,14 @@ export default function Solicitudes() {
   }, [cargar]);
 
   async function cambiar(id: string, estatus: string) {
+    setErrCambio(null);
     const supabase = createClient();
-    await supabase.from("solicitudes").update({ estatus }).eq("id", id);
+    const { error: errUpd } = await supabase.from("solicitudes").update({ estatus }).eq("id", id);
+    if (errUpd) {
+      setErrCambio("Error al actualizar: " + errUpd.message);
+      setTimeout(() => setErrCambio(null), 6000);
+      return;
+    }
     const { data: userData } = await supabase.auth.getUser();
     await supabase.from("bitacora").insert({
       entidad: "solicitud",
@@ -172,6 +180,10 @@ export default function Solicitudes() {
           );
         })}
       </div>
+
+      {errCambio && (
+        <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "11px 16px", borderRadius: 6, fontSize: 13.5, marginBottom: 18 }}>{errCambio}</div>
+      )}
 
       <div className="panel" style={{ overflow: "hidden" }}>
         {cargando ? (
