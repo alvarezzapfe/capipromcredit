@@ -58,7 +58,7 @@ export default function Resumen() {
     (async () => {
       const sb = createClient();
       const [creditosRes, cuponesRes, solicitudesRes, amortRes] = await Promise.all([
-        sb.from("creditos").select("id, acreditado, monto, estatus"),
+        sb.from("creditos").select("id, acreditado, monto, estatus, tipo_producto"),
         sb.from("v_proximos_cupones").select("*").limit(8),
         sb.from("solicitudes").select("id").eq("estatus", "nueva"),
         sb.from("amortizacion").select("credito_id, fecha_pago, pago_total, saldo_inicial, pagado, numero_cupon").eq("pagado", false).order("numero_cupon", { ascending: true }),
@@ -72,6 +72,18 @@ export default function Resumen() {
       amort.forEach((a) => { if (!saldoPorCredito.has(a.credito_id)) saldoPorCredito.set(a.credito_id, Number(a.saldo_inicial)); });
       let saldoTotal = 0;
       saldoPorCredito.forEach((v) => (saldoTotal += v));
+
+      // Add revolvente saldo dispuesto
+      const revolventes = creditos.filter((c: any) => c.tipo_producto === "linea_revolvente" && ["vigente", "en_mora"].includes(c.estatus));
+      if (revolventes.length > 0) {
+        const revIds = revolventes.map((c: any) => c.id);
+        const { data: movs } = await sb.from("movimientos_linea").select("credito_id,tipo,monto").in("credito_id", revIds);
+        for (const id of revIds) {
+          let s = 0;
+          (movs ?? []).filter((m: any) => m.credito_id === id).forEach((m: any) => { s += m.tipo === "disposicion" ? Number(m.monto) : -Number(m.monto); });
+          saldoTotal += Math.max(0, s);
+        }
+      }
 
       setKpis({
         creditosActivos: creditos.filter((c) => ["vigente", "en_mora"].includes(c.estatus)).length,

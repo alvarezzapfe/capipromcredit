@@ -52,6 +52,7 @@ export const TIPO_PRODUCTO_LABEL: Record<string, string> = {
   arrendamiento_financiero: "Arr. Fin.",
   arrendamiento_puro: "Arr. Puro",
   factoraje: "Factoraje",
+  linea_revolvente: "Revolvente",
 };
 
 export const TIPO_PRODUCTO_FULL: Record<string, string> = {
@@ -59,6 +60,7 @@ export const TIPO_PRODUCTO_FULL: Record<string, string> = {
   arrendamiento_financiero: "Arrendamiento Financiero",
   arrendamiento_puro: "Arrendamiento Puro",
   factoraje: "Factoraje",
+  linea_revolvente: "Línea Revolvente",
 };
 
 export const GARANTIA_LABEL: Record<string, string> = {

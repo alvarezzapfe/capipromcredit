@@ -17,7 +17,8 @@ export type TipoProducto =
   | "credito_simple"
   | "arrendamiento_financiero"
   | "arrendamiento_puro"
-  | "factoraje";
+  | "factoraje"
+  | "linea_revolvente";
 
 /** Campos de entrada — todos los que puede traer un form o una fila de Excel */
 export interface InputOperacion {
@@ -55,6 +56,10 @@ export interface InputOperacion {
   tasa_descuento_pct?: number; // 24 = 24%
   comision_pct?: number; // 2 = 2%
   fecha_vencimiento?: string;
+
+  // Línea revolvente
+  limite_linea?: number;
+  disposicion_inicial?: number; // monto de disposición inicial (opcional)
 }
 
 /** Lo que se insertará en Supabase */
@@ -62,6 +67,7 @@ export interface ResultadoOperacion {
   creditoRow: Record<string, any>;
   cupones: Omit<Cupon, "">[];
   disposicionMonto: number;
+  movimientoInicial?: { fecha: string; tipo: "disposicion"; monto: number };
 }
 
 /** Valida y construye los payloads; lanza Error con mensaje legible si algo falla */
@@ -146,6 +152,51 @@ export function construirOperacion(input: InputOperacion): ResultadoOperacion {
     ];
 
     return { creditoRow, cupones, disposicionMonto: desg.anticipo };
+  }
+
+  // ── LÍNEA REVOLVENTE ───────────────────────────────────────
+  if (tp === "linea_revolvente") {
+    const limite = input.limite_linea ?? 0;
+    if (limite <= 0) throw new Error("limite_linea debe ser > 0");
+    if (tasaEfectivaPct <= 0) throw new Error("tasa debe ser > 0");
+    const plazo = input.plazo_meses ?? 0;
+    if (plazo <= 0) throw new Error("plazo_meses (vigencia) debe ser > 0");
+
+    const tasaFinal = tasaEfectivaPct / 100;
+    const creditoRow: Record<string, any> = {
+      folio,
+      acreditado: input.acreditado,
+      rfc: input.rfc || null,
+      tipo_producto: "linea_revolvente",
+      monto: 0,
+      limite_linea: limite,
+      tasa_anual: tasaFinal,
+      plazo_meses: plazo,
+      frecuencia: input.frecuencia ?? "mensual",
+      metodo_amort: "bullet",
+      fecha_origen: input.fecha_origen,
+      estatus: "vigente",
+      tipo_tasa: input.tipo_tasa ?? "fija",
+      tasa_referencia:
+        input.tipo_tasa === "variable" ? (input.tasa_referencia ?? null) : null,
+      valor_referencia:
+        input.tipo_tasa === "variable"
+          ? (input.valor_referencia_pct ?? 0) / 100
+          : null,
+      spread_pp:
+        input.tipo_tasa === "variable" ? (input.spread_pp ?? 0) / 100 : null,
+      tipo_garantia: input.tipo_garantia || "quirografaria",
+      periodo_gracia_meses: 0,
+      tipo_gracia: "ninguna",
+      tipo_disposicion: "unica",
+    };
+
+    const dispInicial = input.disposicion_inicial ?? 0;
+    const movInicial = dispInicial > 0
+      ? { fecha: input.fecha_origen, tipo: "disposicion" as const, monto: dispInicial }
+      : undefined;
+
+    return { creditoRow, cupones: [], disposicionMonto: 0, movimientoInicial: movInicial };
   }
 
   // ── CRÉDITO SIMPLE / ARRENDAMIENTO ────────────────────────

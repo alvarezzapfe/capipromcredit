@@ -9,7 +9,8 @@ import {
   type Frecuencia, type MetodoAmort, type TipoGracia,
 } from "@/lib/amortizacion";
 import { calcularFactoraje, type DesgloseFactoraje } from "@/lib/factoraje";
-import { construirOperacion, type InputOperacion, type TipoProducto } from "@/lib/operaciones";
+import { construirOperacion, type InputOperacion, type TipoProducto, type ResultadoOperacion } from "@/lib/operaciones";
+import { calcularEstadoLinea, type Movimiento } from "@/lib/revolvente";
 import { useRol } from "@/lib/useRol";
 import { esSoloLectura, puedeEliminar, puedeEliminarDesdeTabla, type Rol } from "@/lib/rbac";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -35,6 +36,7 @@ interface Credito {
   tipo_gracia: string;
   tipo_disposicion: string;
   tipo_producto: TipoProducto;
+  limite_linea: number | null;
   valor_bien: number | null;
   enganche: number | null;
   valor_residual: number | null;
@@ -86,11 +88,29 @@ export default function Cartera() {
   const [elimDesdeTabla, setElimDesdeTabla] = useState<Credito | null>(null);
   const showTableDelete = puedeEliminarDesdeTabla(rol);
 
+  const [saldosRev, setSaldosRev] = useState<Record<string, number>>({});
+
   const cargar = useCallback(async () => {
     setCargando(true);
     const supabase = createClient();
     const { data } = await supabase.from("creditos").select("*").order("created_at", { ascending: false });
-    setCreditos((data ?? []) as Credito[]);
+    const creds = (data ?? []) as Credito[];
+    setCreditos(creds);
+
+    // Fetch saldos for revolvente lines
+    const revIds = creds.filter(c => c.tipo_producto === "linea_revolvente").map(c => c.id);
+    if (revIds.length > 0) {
+      const { data: movs } = await supabase.from("movimientos_linea").select("credito_id,tipo,monto").in("credito_id", revIds);
+      const saldos: Record<string, number> = {};
+      for (const id of revIds) {
+        const ms = (movs ?? []).filter((m: any) => m.credito_id === id);
+        let s = 0;
+        for (const m of ms) s += m.tipo === "disposicion" ? Number(m.monto) : -Number(m.monto);
+        saldos[id] = Math.max(0, Math.round(s * 100) / 100);
+      }
+      setSaldosRev(saldos);
+    }
+
     setCargando(false);
   }, []);
 
@@ -154,9 +174,9 @@ export default function Cartera() {
               {creditos.map((c) => (
                 <tr key={c.id} onClick={() => setDetalle(c)} style={{ cursor: "pointer" }}>
                   <td className="mono" style={{ color: "var(--amber)" }}>{c.folio}</td>
-                  <td><span className="badge" style={{ background: c.tipo_producto === "factoraje" ? "#ede9fe" : c.tipo_producto?.startsWith("arrendamiento") ? "#e0f2fe" : "#f0f2f5", color: c.tipo_producto === "factoraje" ? "#7c3aed" : c.tipo_producto?.startsWith("arrendamiento") ? "#0284c7" : "#64748b", fontSize: 11 }}>{TIPO_PRODUCTO_LABEL[c.tipo_producto] ?? "Crédito"}</span></td>
+                  <td><span className="badge" style={{ background: c.tipo_producto === "factoraje" ? "#ede9fe" : c.tipo_producto === "linea_revolvente" ? "#ecfdf5" : c.tipo_producto?.startsWith("arrendamiento") ? "#e0f2fe" : "#f0f2f5", color: c.tipo_producto === "factoraje" ? "#7c3aed" : c.tipo_producto === "linea_revolvente" ? "#059669" : c.tipo_producto?.startsWith("arrendamiento") ? "#0284c7" : "#64748b", fontSize: 11 }}>{TIPO_PRODUCTO_LABEL[c.tipo_producto] ?? "Crédito"}</span></td>
                   <td>{c.acreditado}</td>
-                  <td className="mono" style={{ textAlign: "right" }}>{mxn(Number(c.monto))}</td>
+                  <td className="mono" style={{ textAlign: "right" }}>{c.tipo_producto === "linea_revolvente" ? `${mxn(saldosRev[c.id] ?? 0)} / ${mxn(Number(c.limite_linea ?? 0))}` : mxn(Number(c.monto))}</td>
                   <td style={{ fontSize: 12.5 }}>{tasaLabel(c)}</td>
                   <td><span className="badge" style={{ background: "#f0f2f5", color: "#64748b" }}>{GARANTIA_LABEL[c.tipo_garantia] ?? c.tipo_garantia}</span></td>
                   <td style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{graciaLabel(c)}</td>
@@ -574,6 +594,7 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
   const [tipoProducto, setTipoProducto] = useState<TipoProducto>("credito_simple");
   const esArrendamiento = tipoProducto === "arrendamiento_financiero" || tipoProducto === "arrendamiento_puro";
   const esFactoraje = tipoProducto === "factoraje";
+  const esRevolvente = tipoProducto === "linea_revolvente";
 
   const [form, setForm] = useState({
     acreditado: "", rfc: "",
@@ -589,6 +610,8 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
     valor_bien: "", enganche: "", valor_residual: "",
     deudor: "", monto_factura: "", aforo: "80", tasa_descuento: "", comision_pct: "2",
     fecha_vencimiento: "",
+    // Revolvente
+    limite_linea: "", disposicion_inicial: "",
   });
   const [disposiciones, setDisposiciones] = useState<{ monto: string; fecha: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -643,7 +666,13 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
       if (esFactoraje && !form.deudor) return "Ingresa el deudor.";
     }
     if (s === 1) {
-      if (esFactoraje) {
+      if (esRevolvente) {
+        if (!form.limite_linea || Number(form.limite_linea) <= 0) return "Ingresa el límite de la línea.";
+        if (tasaEfectiva <= 0) return "La tasa debe ser mayor a 0.";
+        if (!form.plazo_meses) return "Ingresa la vigencia (meses).";
+        const di = Number(form.disposicion_inicial) || 0;
+        if (di > Number(form.limite_linea)) return "La disposición inicial no puede exceder el límite.";
+      } else if (esFactoraje) {
         if (!form.monto_factura || Number(form.monto_factura) <= 0) return "Ingresa el monto de la factura.";
         if (!form.tasa_descuento || Number(form.tasa_descuento) <= 0) return "Ingresa la tasa de descuento.";
         if (!form.fecha_vencimiento) return "Ingresa la fecha de vencimiento.";
@@ -689,8 +718,10 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
       deudor: form.deudor || undefined, monto_factura: Number(form.monto_factura) || 0, aforo_pct: Number(form.aforo) || 80,
       tasa_descuento_pct: Number(form.tasa_descuento) || 0, comision_pct: Number(form.comision_pct) || 0,
       fecha_vencimiento: form.fecha_vencimiento || undefined,
+      limite_linea: Number(form.limite_linea) || 0,
+      disposicion_inicial: Number(form.disposicion_inicial) || 0,
     };
-    let resultado;
+    let resultado: ResultadoOperacion;
     try { resultado = construirOperacion(input); } catch (e: any) { setError(e.message); return; }
 
     setGuardando(true);
@@ -702,13 +733,20 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
     const { data: credito, error: errCred } = await supabase.from("creditos").insert(creditoRow).select().single();
     if (errCred || !credito) { setGuardando(false); setError("Error: " + (errCred?.message ?? "")); return; }
 
-    if (tipoProducto === "credito_simple" && form.tipo_disposicion === "multiple" && disposiciones.length > 0) {
-      await supabase.from("disposiciones").insert(disposiciones.map((d, i) => ({ credito_id: credito.id, numero: i + 1, monto: Number(d.monto), fecha: d.fecha })));
+    if (esRevolvente) {
+      // No disposiciones nor amortizacion for revolvente
+      if (resultado.movimientoInicial) {
+        await supabase.from("movimientos_linea").insert({ credito_id: credito.id, fecha: resultado.movimientoInicial.fecha, tipo: resultado.movimientoInicial.tipo, monto: resultado.movimientoInicial.monto, nota: "Disposición inicial" });
+      }
     } else {
-      await supabase.from("disposiciones").insert({ credito_id: credito.id, numero: 1, monto: disposicionMonto, fecha: form.fecha_origen });
+      if (tipoProducto === "credito_simple" && form.tipo_disposicion === "multiple" && disposiciones.length > 0) {
+        await supabase.from("disposiciones").insert(disposiciones.map((d, i) => ({ credito_id: credito.id, numero: i + 1, monto: Number(d.monto), fecha: d.fecha })));
+      } else {
+        await supabase.from("disposiciones").insert({ credito_id: credito.id, numero: 1, monto: disposicionMonto, fecha: form.fecha_origen });
+      }
+      await supabase.from("amortizacion").insert(cupones.map((c) => ({ credito_id: credito.id, numero_cupon: c.numero_cupon, fecha_pago: c.fecha_pago, saldo_inicial: c.saldo_inicial, capital: c.capital, interes: c.interes, pago_total: c.pago_total, saldo_final: c.saldo_final })));
     }
-    await supabase.from("amortizacion").insert(cupones.map((c) => ({ credito_id: credito.id, numero_cupon: c.numero_cupon, fecha_pago: c.fecha_pago, saldo_inicial: c.saldo_inicial, capital: c.capital, interes: c.interes, pago_total: c.pago_total, saldo_final: c.saldo_final })));
-    await supabase.from("bitacora").insert({ entidad: "credito", entidad_id: credito.id, accion: "creado", detalle: { folio: creditoRow.folio, tipo: tipoProducto, monto: creditoRow.monto, cupones: cupones.length }, usuario: operador });
+    await supabase.from("bitacora").insert({ entidad: "credito", entidad_id: credito.id, accion: "creado", detalle: { folio: creditoRow.folio, tipo: tipoProducto, monto: creditoRow.monto ?? creditoRow.limite_linea, cupones: cupones.length }, usuario: operador });
     setGuardando(false);
     onSaved();
   }
@@ -821,7 +859,7 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
           <div style={{ display: "grid", gap: 12 }}>
             {sectionTitle("Tipo de producto")}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-              {(["credito_simple", "arrendamiento_financiero", "arrendamiento_puro", "factoraje"] as TipoProducto[]).map((tp) => (
+              {(["credito_simple", "arrendamiento_financiero", "arrendamiento_puro", "factoraje", "linea_revolvente"] as TipoProducto[]).map((tp) => (
                 <button key={tp} onClick={() => cambiarProducto(tp)} style={{ padding: "9px 6px", fontSize: 12.5, fontFamily: "inherit", fontWeight: tipoProducto === tp ? 600 : 400, border: tipoProducto === tp ? "1px solid var(--amber)" : "1px solid var(--line)", borderRadius: 6, background: tipoProducto === tp ? "var(--amber-soft)" : "transparent", color: tipoProducto === tp ? "var(--amber)" : "var(--text-dim)", cursor: "pointer", lineHeight: 1.3 }}>
                   {TIPO_PRODUCTO_FULL[tp]}
                 </button>
@@ -933,12 +971,53 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
                 <div className="field"><label>Fecha de vencimiento *</label><input className="input mono" type="date" value={form.fecha_vencimiento} onChange={(e) => set("fecha_vencimiento", e.target.value)} /></div>
               </div>
             </>)}
+
+            {/* LÍNEA REVOLVENTE */}
+            {esRevolvente && (<>
+              {sectionTitle("Línea")}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div className="field"><label>Límite de la línea (MXN) *</label><input className="input mono" type="number" value={form.limite_linea} onChange={(e) => set("limite_linea", e.target.value)} placeholder="1000000" /></div>
+                <div className="field"><label>Vigencia (meses) *</label><input className="input mono" type="number" value={form.plazo_meses} onChange={(e) => set("plazo_meses", e.target.value)} placeholder="12" /></div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div className="field"><label>Frecuencia de corte</label><select className="select" value={form.frecuencia} onChange={(e) => set("frecuencia", e.target.value)}><option value="mensual">Mensual</option><option value="quincenal">Quincenal</option></select></div>
+                <div className="field"><label>Fecha de origen</label><input className="input mono" type="date" value={form.fecha_origen} onChange={(e) => set("fecha_origen", e.target.value)} /></div>
+              </div>
+              {tasaFields}
+              {sectionTitle("Garantía")}
+              <div className="field"><label>Tipo de garantía</label><select className="select" value={form.tipo_garantia} onChange={(e) => set("tipo_garantia", e.target.value)}><option value="quirografaria">Quirografaria</option><option value="fideicomiso_flujo">Fideicomiso de flujo</option><option value="derecho_cobro">Cesión de derecho de cobro</option></select></div>
+              {sectionTitle("Disposición inicial (opcional)")}
+              <div className="field"><label>Monto a disponer</label><input className="input mono" type="number" value={form.disposicion_inicial} onChange={(e) => set("disposicion_inicial", e.target.value)} placeholder="0" /></div>
+              {Number(form.disposicion_inicial) > 0 && Number(form.limite_linea) > 0 && (
+                <div style={{ fontSize: 12, color: "var(--text-dim)", background: "var(--amber-soft)", padding: "6px 10px", borderRadius: 6 }}>
+                  Disponible después de disposición: <strong className="mono">{mxn(Number(form.limite_linea) - Number(form.disposicion_inicial))}</strong>
+                </div>
+              )}
+            </>)}
           </div>
         )}
 
         {/* ═══════ PASO 3: Revisar ═══════ */}
         {step === 2 && (
-          <div>{previewPanel}</div>
+          <div>
+            {esRevolvente ? (
+              <div style={{ background: "#f4f6f8", borderRadius: 8, padding: isMobile ? "16px" : "20px 22px" }}>
+                <h3 style={{ fontSize: 15, fontWeight: 600, color: "#0a1628", marginBottom: 12 }}>Resumen de la línea</h3>
+                <div className="panel" style={{ padding: "16px 18px" }}>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <DesgloseRow label="Límite" valor={mxn(Number(form.limite_linea))} bold />
+                    <DesgloseRow label="Disposición inicial" valor={Number(form.disposicion_inicial) > 0 ? mxn(Number(form.disposicion_inicial)) : "—"} />
+                    <DesgloseRow label="Disponible" valor={mxn(Number(form.limite_linea) - (Number(form.disposicion_inicial) || 0))} bold amber />
+                    <div style={{ borderTop: "1px solid var(--line)", paddingTop: 8 }} />
+                    <DesgloseRow label="Tasa" valor={tasaEfectiva.toFixed(2) + "% anual"} />
+                    <DesgloseRow label="Vigencia" valor={form.plazo_meses + " meses"} dim />
+                    <DesgloseRow label="Garantía" valor={GARANTIA_LABEL[form.tipo_garantia] ?? form.tipo_garantia} dim />
+                  </div>
+                </div>
+                <p style={{ fontSize: 12, color: "var(--text-faint)", marginTop: 10 }}>La línea revolvente no genera tabla de amortización. El interés se calcula sobre el saldo dispuesto.</p>
+              </div>
+            ) : previewPanel}
+          </div>
         )}
 
         {/* Error + navigation */}
@@ -976,9 +1055,16 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
   const [amort, setAmort] = useState<any[]>([]);
   const [bitacora, setBitacora] = useState<any[]>([]);
   const [disps, setDisps] = useState<Disposicion[]>([]);
+  const [movimientos, setMovimientos] = useState<any[]>([]);
   const [estatus, setEstatus] = useState(credito.estatus);
   const [guardando, setGuardando] = useState(false);
   const [mostrarConfirmElim, setMostrarConfirmElim] = useState(false);
+  // Revolvente: forms for new movements
+  const [movForm, setMovForm] = useState({ tipo: "disposicion" as "disposicion" | "pago", monto: "", fecha: new Date().toISOString().slice(0, 10), nota: "" });
+  const [movError, setMovError] = useState<string | null>(null);
+  const [movGuardando, setMovGuardando] = useState(false);
+
+  const esRev = credito.tipo_producto === "linea_revolvente";
 
   const cargar = useCallback(async () => {
     const supabase = createClient();
@@ -990,7 +1076,11 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
     setAmort(a.data ?? []);
     setBitacora(b.data ?? []);
     setDisps((d.data ?? []) as Disposicion[]);
-  }, [credito.id]);
+    if (esRev) {
+      const { data: movs } = await supabase.from("movimientos_linea").select("*").eq("credito_id", credito.id).order("fecha").order("created_at");
+      setMovimientos(movs ?? []);
+    }
+  }, [credito.id, esRev]);
 
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -1034,7 +1124,7 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
 
         {/* Parametrización */}
         <div style={{ marginBottom: 6 }}>
-          <span className="badge" style={{ background: credito.tipo_producto === "factoraje" ? "#ede9fe" : credito.tipo_producto?.startsWith("arrendamiento") ? "#e0f2fe" : "#f0f2f5", color: credito.tipo_producto === "factoraje" ? "#7c3aed" : credito.tipo_producto?.startsWith("arrendamiento") ? "#0284c7" : "#64748b", fontSize: 11.5, marginBottom: 8, display: "inline-block" }}>{TIPO_PRODUCTO_FULL[credito.tipo_producto] ?? "Crédito Simple"}</span>
+          <span className="badge" style={{ background: credito.tipo_producto === "factoraje" ? "#ede9fe" : credito.tipo_producto === "linea_revolvente" ? "#ecfdf5" : credito.tipo_producto?.startsWith("arrendamiento") ? "#e0f2fe" : "#f0f2f5", color: credito.tipo_producto === "factoraje" ? "#7c3aed" : credito.tipo_producto === "linea_revolvente" ? "#059669" : credito.tipo_producto?.startsWith("arrendamiento") ? "#0284c7" : "#64748b", fontSize: 11.5, marginBottom: 8, display: "inline-block" }}>{TIPO_PRODUCTO_FULL[credito.tipo_producto] ?? "Crédito Simple"}</span>
         </div>
 
         {/* Arrendamiento: info del bien */}
@@ -1083,6 +1173,14 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
               } catch { return null; }
             })()}
           </>
+        ) : esRev ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 10, marginBottom: 20 }}>
+            <Dato label="Límite" valor={mxn(Number(credito.limite_linea ?? 0))} />
+            <Dato label="Tasa" valor={tasaLabel(credito)} />
+            <Dato label="Vigencia" valor={`${credito.plazo_meses}m`} />
+            <Dato label="Garantía" valor={GARANTIA_LABEL[credito.tipo_garantia] ?? credito.tipo_garantia} />
+            <Dato label="Origen" valor={fecha(credito.fecha_origen)} />
+          </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 10, marginBottom: 20 }}>
             <Dato label="Monto" valor={mxn(Number(credito.monto))} />
@@ -1114,7 +1212,100 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
           <button className="btn btn-primary" onClick={cambiarEstatus} disabled={estatus === credito.estatus || guardando} style={{ padding: "9px 16px", fontSize: 13, opacity: estatus === credito.estatus ? 0.5 : 1 }}>{guardando ? "Guardando…" : "Actualizar"}</button>
         </div>}
 
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.4fr 1fr", gap: isMobile ? 16 : 24 }}>
+        {/* Revolvente: estado de cuenta */}
+        {esRev && (() => {
+          const limite = Number(credito.limite_linea ?? 0);
+          const tasaAnual = Number(credito.tasa_anual);
+          const hoyStr = new Date().toISOString().slice(0, 10);
+          const estado = calcularEstadoLinea(movimientos as Movimiento[], tasaAnual, hoyStr);
+          const disponible = Math.max(0, limite - estado.saldoDispuesto);
+
+          // Compute running balance for the table
+          let saldoAcum = 0;
+          const movConSaldo = movimientos.map((m: any) => {
+            saldoAcum += m.tipo === "disposicion" ? Number(m.monto) : -Number(m.monto);
+            return { ...m, saldoResultante: Math.max(0, Math.round(saldoAcum * 100) / 100) };
+          });
+
+          async function registrarMovimiento() {
+            setMovError(null);
+            const montoMov = Number(movForm.monto) || 0;
+            if (montoMov <= 0) { setMovError("Ingresa un monto mayor a 0."); return; }
+            if (movForm.tipo === "disposicion" && montoMov > disponible) { setMovError(`Monto excede disponible (${mxn(disponible)}).`); return; }
+            if (movForm.tipo === "pago" && montoMov > estado.saldoDispuesto) { setMovError(`Monto excede saldo dispuesto (${mxn(estado.saldoDispuesto)}).`); return; }
+
+            setMovGuardando(true);
+            const supabase = createClient();
+            const { data: userData } = await supabase.auth.getUser();
+            const operador = userData.user?.email ?? "sistema";
+
+            const { error: errMov } = await supabase.from("movimientos_linea").insert({ credito_id: credito.id, fecha: movForm.fecha, tipo: movForm.tipo, monto: montoMov, nota: movForm.nota || null });
+            if (errMov) { setMovGuardando(false); setMovError("Error: " + errMov.message); return; }
+
+            await supabase.from("bitacora").insert({ entidad: "credito", entidad_id: credito.id, accion: movForm.tipo === "disposicion" ? "disposicion_revolvente" : "pago_revolvente", detalle: { monto: montoMov, fecha: movForm.fecha }, usuario: operador });
+
+            setMovForm({ tipo: "disposicion", monto: "", fecha: new Date().toISOString().slice(0, 10), nota: "" });
+            setMovGuardando(false);
+            cargar();
+            onChanged();
+          }
+
+          return (
+            <>
+              {/* KPIs */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 20 }}>
+                <Dato label="Límite" valor={mxn(limite)} />
+                <Dato label="Saldo dispuesto" valor={mxn(estado.saldoDispuesto)} />
+                <Dato label="Disponible" valor={mxn(disponible)} />
+                <Dato label="Interés devengado" valor={mxn(estado.interesDevengado)} />
+                <Dato label="Tasa" valor={tasaLabel(credito)} />
+              </div>
+
+              {/* Register movement (admin only) */}
+              {!readOnly && (
+                <div className="panel" style={{ padding: "16px 18px", marginBottom: 20 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Registrar movimiento</div>
+                  <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "auto 1fr 1fr 1fr auto", gap: 10, alignItems: "end" }}>
+                    <div className="field"><label>Tipo</label><select className="select" value={movForm.tipo} onChange={(e) => setMovForm(f => ({ ...f, tipo: e.target.value as "disposicion" | "pago" }))} style={{ minWidth: 120 }}><option value="disposicion">Disposición</option><option value="pago">Pago</option></select></div>
+                    <div className="field"><label>Monto *</label><input className="input mono" type="number" value={movForm.monto} onChange={(e) => setMovForm(f => ({ ...f, monto: e.target.value }))} placeholder="0" /></div>
+                    <div className="field"><label>Fecha</label><input className="input mono" type="date" value={movForm.fecha} onChange={(e) => setMovForm(f => ({ ...f, fecha: e.target.value }))} /></div>
+                    <div className="field"><label>Nota</label><input className="input" value={movForm.nota} onChange={(e) => setMovForm(f => ({ ...f, nota: e.target.value }))} placeholder="Opcional" /></div>
+                    <button className="btn btn-primary" onClick={registrarMovimiento} disabled={movGuardando} style={{ padding: "9px 16px", fontSize: 13 }}>{movGuardando ? "…" : "Registrar"}</button>
+                  </div>
+                  {movError && <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "8px 12px", borderRadius: 6, fontSize: 12.5, marginTop: 8 }}>{movError}</div>}
+                </div>
+              )}
+
+              {/* Movements table */}
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.4fr 1fr", gap: isMobile ? 16 : 24 }}>
+                <div>
+                  <h3 style={{ fontSize: 16, fontWeight: 600, color: "#0a1628", marginBottom: 12 }}>Estado de cuenta</h3>
+                  <div className="panel" style={{ overflow: "hidden", maxHeight: 420, overflowY: "auto" }}>
+                    <table className="table" style={{ fontSize: 12.5 }}>
+                      <thead><tr><th>Fecha</th><th>Tipo</th><th style={{ textAlign: "right" }}>Monto</th><th style={{ textAlign: "right" }}>Saldo</th></tr></thead>
+                      <tbody>
+                        {movConSaldo.length === 0 ? (
+                          <tr><td colSpan={4} style={{ padding: 20, textAlign: "center", color: "var(--text-faint)" }}>Sin movimientos</td></tr>
+                        ) : movConSaldo.map((m: any, i: number) => (
+                          <tr key={m.id ?? i}>
+                            <td>{fecha(m.fecha)}</td>
+                            <td><span className="badge" style={{ background: m.tipo === "disposicion" ? "#e0f2fe" : "#e8f3ed", color: m.tipo === "disposicion" ? "#0284c7" : "var(--green)", fontSize: 11 }}>{m.tipo === "disposicion" ? "Disposición" : "Pago"}</span></td>
+                            <td className="mono" style={{ textAlign: "right", color: m.tipo === "pago" ? "var(--green)" : "inherit" }}>{m.tipo === "pago" ? "- " : ""}{mxn(Number(m.monto))}</td>
+                            <td className="mono" style={{ textAlign: "right", color: "var(--text-dim)" }}>{mxn(m.saldoResultante)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <TrazabilidadPanel bitacora={bitacora} />
+              </div>
+            </>
+          );
+        })()}
+
+        {/* Non-revolvente: amortization + trazabilidad */}
+        {!esRev && <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.4fr 1fr", gap: isMobile ? 16 : 24 }}>
           <div>
             <h3 style={{ fontSize: 16, fontWeight: 600, color: "#0a1628", marginBottom: 12 }}>{credito.tipo_producto === "factoraje" ? "Cupón de liquidación" : "Tabla de amortización"}</h3>
             <div className="panel" style={{ overflow: "hidden", maxHeight: 420, overflowY: "auto" }}>
@@ -1135,19 +1326,8 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
               </table>
             </div>
           </div>
-          <div>
-            <h3 style={{ fontSize: 16, fontWeight: 600, color: "#0a1628", marginBottom: 12 }}>Trazabilidad</h3>
-            <div className="panel" style={{ padding: "8px 0", maxHeight: 420, overflowY: "auto" }}>
-              {bitacora.length === 0 ? <p style={{ padding: 20, color: "var(--text-faint)", fontSize: 13 }}>Sin movimientos.</p> : bitacora.map((b) => (
-                <div key={b.id} style={{ padding: "11px 18px", borderBottom: "1px solid var(--line-soft)" }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{accionLabel(b.accion)}</div>
-                  {b.detalle?.de && <div style={{ fontSize: 12, color: "var(--text-dim)" }}>{labelEstatus[b.detalle.de]} → {labelEstatus[b.detalle.a]}</div>}
-                  <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 3 }}>{new Date(b.created_at).toLocaleString("es-MX")} · {b.usuario}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+          <TrazabilidadPanel bitacora={bitacora} />
+        </div>}
       </div>
     </Overlay>
     {mostrarConfirmElim && <ModalConfirmarEliminacion credito={credito} onClose={() => setMostrarConfirmElim(false)} onDeleted={onDeleted} />}
@@ -1155,8 +1335,26 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
   );
 }
 
+function TrazabilidadPanel({ bitacora }: { bitacora: any[] }) {
+  return (
+    <div>
+      <h3 style={{ fontSize: 16, fontWeight: 600, color: "#0a1628", marginBottom: 12 }}>Trazabilidad</h3>
+      <div className="panel" style={{ padding: "8px 0", maxHeight: 420, overflowY: "auto" }}>
+        {bitacora.length === 0 ? <p style={{ padding: 20, color: "var(--text-faint)", fontSize: 13 }}>Sin movimientos.</p> : bitacora.map((b) => (
+          <div key={b.id} style={{ padding: "11px 18px", borderBottom: "1px solid var(--line-soft)" }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{accionLabel(b.accion)}</div>
+            {b.detalle?.de && <div style={{ fontSize: 12, color: "var(--text-dim)" }}>{labelEstatus[b.detalle.de]} → {labelEstatus[b.detalle.a]}</div>}
+            {b.detalle?.monto && !b.detalle?.de && <div style={{ fontSize: 12, color: "var(--text-dim)" }}>{mxn(Number(b.detalle.monto))}</div>}
+            <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 3 }}>{new Date(b.created_at).toLocaleString("es-MX")} · {b.usuario}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function accionLabel(a: string) {
-  return ({ creado: "Crédito originado", cambio_estatus: "Cambio de estatus", pago_registrado: "Pago registrado", pago_revertido: "Pago revertido", credito_eliminado: "Crédito eliminado" } as Record<string, string>)[a] ?? a;
+  return ({ creado: "Crédito originado", cambio_estatus: "Cambio de estatus", pago_registrado: "Pago registrado", pago_revertido: "Pago revertido", credito_eliminado: "Crédito eliminado", disposicion_revolvente: "Disposición", pago_revolvente: "Pago de capital" } as Record<string, string>)[a] ?? a;
 }
 
 function ModalConfirmarEliminacion({ credito, onClose, onDeleted }: { credito: Credito; onClose: () => void; onDeleted: (folio: string) => void }) {
