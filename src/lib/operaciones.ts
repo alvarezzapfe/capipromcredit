@@ -25,6 +25,7 @@ export interface InputOperacion {
   tipo_producto: TipoProducto;
   folio?: string; // si no viene, se autogenera
   acreditado: string;
+  cliente_id?: string;
   rfc?: string;
   fecha_origen: string;
 
@@ -114,6 +115,7 @@ export function construirOperacion(input: InputOperacion): ResultadoOperacion {
     const creditoRow: Record<string, any> = {
       folio,
       acreditado: input.acreditado,
+      ...(input.cliente_id ? { cliente_id: input.cliente_id } : {}),
       rfc: input.rfc || null,
       tipo_producto: "factoraje",
       monto: desg.anticipo,
@@ -166,6 +168,7 @@ export function construirOperacion(input: InputOperacion): ResultadoOperacion {
     const creditoRow: Record<string, any> = {
       folio,
       acreditado: input.acreditado,
+      ...(input.cliente_id ? { cliente_id: input.cliente_id } : {}),
       rfc: input.rfc || null,
       tipo_producto: "linea_revolvente",
       monto: 0,

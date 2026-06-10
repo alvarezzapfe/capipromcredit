@@ -6,13 +6,14 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Briefcase, FileText, CalendarClock,
-  BarChart3, Users, LogOut, Menu, X,
+  BarChart3, Users, LogOut, Menu, X, UserCheck,
 } from "lucide-react";
 import { useIsMobile } from "@/lib/useIsMobile";
 
 const mainItems = [
   { href: "/dashboard", label: "Resumen", Icon: LayoutDashboard },
   { href: "/dashboard/cartera", label: "Cartera", Icon: Briefcase },
+  { href: "/dashboard/clientes", label: "Clientes", Icon: UserCheck },
   { href: "/dashboard/creditos", label: "Solicitudes", Icon: FileText },
   { href: "/dashboard/flujos", label: "Flujos y cobranza", Icon: CalendarClock },
   { href: "/dashboard/reportes", label: "Reportes", Icon: BarChart3 },

@@ -14,6 +14,7 @@ import { calcularEstadoLinea, type Movimiento } from "@/lib/revolvente";
 import { useRol } from "@/lib/useRol";
 import { esSoloLectura, puedeEliminar, puedeEliminarDesdeTabla, type Rol } from "@/lib/rbac";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { ModalAltaCliente } from "@/components/ModalAltaCliente";
 
 interface Credito {
   id: string;
@@ -492,6 +493,19 @@ function ModalImportar({ isMobile, onClose, onDone }: { isMobile?: boolean; onCl
       setProgreso({ actual: i + 1, total: validas.length });
       const fila = validas[i];
       try {
+        // Match or create client
+        const nombreCli = fila.input.acreditado.trim();
+        const rfcCli = fila.input.rfc?.trim() || null;
+        let clienteId: string | undefined;
+        const { data: existentes } = await supabase.from("clientes").select("id, nombre").ilike("nombre", nombreCli).limit(1);
+        if (existentes && existentes.length > 0) {
+          clienteId = existentes[0].id;
+        } else {
+          const { data: nuevo } = await supabase.from("clientes").insert({ tipo_persona: "moral", nombre: nombreCli, rfc: rfcCli }).select("id").single();
+          if (nuevo) clienteId = nuevo.id;
+        }
+        fila.input.cliente_id = clienteId;
+
         const { creditoRow, cupones, disposicionMonto } = construirOperacion(fila.input);
 
         // Force unica for imports
@@ -698,6 +712,23 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
   const esFactoraje = tipoProducto === "factoraje";
   const esRevolvente = tipoProducto === "linea_revolvente";
 
+  // Client selector state
+  const [clientesBusq, setClientesBusq] = useState<{ id: string; nombre: string; rfc: string | null }[]>([]);
+  const [clienteQuery, setClienteQuery] = useState("");
+  const [clienteSel, setClienteSel] = useState<{ id: string; nombre: string } | null>(null);
+  const [mostrarAltaCliente, setMostrarAltaCliente] = useState(false);
+
+  // Search clients on query change
+  useEffect(() => {
+    if (!clienteQuery || clienteQuery.length < 2) { setClientesBusq([]); return; }
+    const t = setTimeout(async () => {
+      const supabase = createClient();
+      const { data } = await supabase.from("clientes").select("id, nombre, rfc").or(`nombre.ilike.%${clienteQuery}%,rfc.ilike.%${clienteQuery}%`).limit(8);
+      setClientesBusq((data ?? []) as any[]);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [clienteQuery]);
+
   const [form, setForm] = useState({
     acreditado: "", rfc: "",
     monto: "", plazo_meses: "", frecuencia: "mensual" as Frecuencia,
@@ -764,7 +795,7 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
   // Validation per step
   function validarPaso(s: number): string | null {
     if (s === 0) {
-      if (!form.acreditado) return "Ingresa el acreditado.";
+      if (!clienteSel) return "Selecciona un cliente.";
       if (esFactoraje && !form.deudor) return "Ingresa el deudor.";
     }
     if (s === 1) {
@@ -810,7 +841,7 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
   async function guardar() {
     setError(null);
     const input: InputOperacion = {
-      tipo_producto: tipoProducto, acreditado: form.acreditado, rfc: form.rfc || undefined, fecha_origen: form.fecha_origen,
+      tipo_producto: tipoProducto, acreditado: clienteSel?.nombre ?? form.acreditado, cliente_id: clienteSel?.id, rfc: form.rfc || undefined, fecha_origen: form.fecha_origen,
       monto: Number(form.monto) || 0, tipo_tasa: form.tipo_tasa, tasa_anual_pct: Number(form.tasa_anual) || 0,
       tasa_referencia: form.tasa_referencia, valor_referencia_pct: Number(form.valor_referencia) || 0, spread_pp: Number(form.spread_pp) || 0,
       plazo_meses: Number(form.plazo_meses) || 0, frecuencia: form.frecuencia, metodo_amort: form.metodo_amort,
@@ -968,12 +999,33 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
               ))}
             </div>
 
-            {sectionTitle(esFactoraje ? "Cedente" : "Acreditado")}
-            <div className="field"><label>{esFactoraje ? "Cedente (razón social) *" : "Nombre / razón social *"}</label><input className="input" value={form.acreditado} onChange={(e) => set("acreditado", e.target.value)} /></div>
-            <div className="field"><label>RFC</label><input className="input" value={form.rfc} onChange={(e) => set("rfc", e.target.value.toUpperCase())} /></div>
+            {sectionTitle(esFactoraje ? "Cedente" : "Cliente")}
+            {clienteSel ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "var(--amber-soft)", borderRadius: 6 }}>
+                <span style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>{clienteSel.nombre}</span>
+                <button className="btn btn-ghost" onClick={() => { setClienteSel(null); setClienteQuery(""); }} style={{ padding: "4px 10px", fontSize: 12 }}>Cambiar</button>
+              </div>
+            ) : (
+              <div style={{ position: "relative" }}>
+                <div className="field"><label>{esFactoraje ? "Buscar cedente *" : "Buscar cliente *"}</label><input className="input" value={clienteQuery} onChange={(e) => setClienteQuery(e.target.value)} placeholder="Nombre o RFC…" /></div>
+                {clientesBusq.length > 0 && (
+                  <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 10, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 6, boxShadow: "var(--shadow-md)", maxHeight: 200, overflowY: "auto" }}>
+                    {clientesBusq.map((c) => (
+                      <button key={c.id} onClick={() => { setClienteSel({ id: c.id, nombre: c.nombre }); setClienteQuery(""); setClientesBusq([]); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", fontSize: 13, background: "transparent", border: "none", borderBottom: "1px solid var(--line-soft)", cursor: "pointer", fontFamily: "inherit" }}>
+                        <span style={{ fontWeight: 600 }}>{c.nombre}</span>
+                        {c.rfc && <span style={{ color: "var(--text-faint)", fontSize: 11.5, marginLeft: 8 }}>{c.rfc}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button className="btn btn-ghost" onClick={() => setMostrarAltaCliente(true)} style={{ marginTop: 6, fontSize: 12, padding: "6px 12px" }}><Plus size={12} strokeWidth={1.75} /> Nuevo cliente</button>
+              </div>
+            )}
             {esFactoraje && (
               <div className="field"><label>Deudor (quién paga la factura) *</label><input className="input" value={form.deudor} onChange={(e) => set("deudor", e.target.value)} /></div>
             )}
+
+            {mostrarAltaCliente && <ModalAltaCliente isMobile={isMobile} onClose={() => setMostrarAltaCliente(false)} onSaved={() => setMostrarAltaCliente(false)} onCreated={(c: any) => { setClienteSel({ id: c.id, nombre: c.nombre }); setMostrarAltaCliente(false); }} />}
           </div>
         )}
 
