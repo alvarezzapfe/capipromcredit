@@ -24,6 +24,11 @@ interface Cliente {
   fecha_constitucion: string | null;
   fecha_nacimiento: string | null;
   notas: string | null;
+  fecha_alta: string | null;
+  contacto_nombre: string | null;
+  contacto_puesto: string | null;
+  contacto_telefono: string | null;
+  contacto_email: string | null;
   created_at: string;
 }
 
@@ -201,16 +206,38 @@ function ModalDetalleCliente({ cliente, isMobile, readOnly, onClose, onChanged }
 
   useEffect(() => { cargar(); }, [cargar]);
 
+  const ALLOWED_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/webp"];
+  const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+
+  function sanitizeName(name: string): string {
+    return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  }
+
   async function subirArchivo(tipo: string, e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setErrDoc(null);
+
+    // Validate type
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setErrDoc("Tipo de archivo no permitido. Solo PDF, PNG, JPG o WEBP.");
+      e.target.value = "";
+      return;
+    }
+    // Validate size
+    if (file.size > MAX_SIZE) {
+      setErrDoc(`Archivo demasiado grande (${(file.size / 1024 / 1024).toFixed(1)} MB). Máximo 10 MB.`);
+      e.target.value = "";
+      return;
+    }
+
     setSubiendo(tipo);
 
     const supabase = createClient();
     const { data: userData } = await supabase.auth.getUser();
     const email = userData.user?.email ?? "sistema";
-    const path = `${cliente.id}/${tipo}/${Date.now()}_${file.name}`;
+    const safeName = sanitizeName(file.name);
+    const path = `${cliente.id}/${tipo}/${Date.now()}_${safeName}`;
 
     const { error: upErr } = await supabase.storage.from("expedientes").upload(path, file);
     if (upErr) { setSubiendo(null); setErrDoc("Error al subir: " + upErr.message); return; }
@@ -258,7 +285,7 @@ function ModalDetalleCliente({ cliente, isMobile, readOnly, onClose, onChanged }
         </div>
 
         {/* Info */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 10, marginBottom: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 10, marginBottom: 14 }}>
           <DatoC label="RFC" valor={cliente.rfc ?? "—"} />
           {cliente.tipo_persona === "fisica" && <DatoC label="CURP" valor={cliente.curp ?? "—"} />}
           {cliente.tipo_persona === "moral" && <DatoC label="Rep. legal" valor={cliente.representante_legal ?? "—"} />}
@@ -266,7 +293,17 @@ function ModalDetalleCliente({ cliente, isMobile, readOnly, onClose, onChanged }
           <DatoC label="Teléfono" valor={cliente.telefono ?? "—"} />
           <DatoC label="Actividad" valor={cliente.actividad ?? "—"} />
           {cliente.domicilio && <DatoC label="Domicilio" valor={`${cliente.domicilio}${cliente.cp ? `, CP ${cliente.cp}` : ""}`} />}
+          {cliente.fecha_alta && <DatoC label="Fecha de alta" valor={new Date(cliente.fecha_alta + "T00:00:00").toLocaleDateString("es-MX")} />}
         </div>
+        {/* Contacto */}
+        {(cliente.contacto_nombre || cliente.contacto_email || cliente.contacto_telefono) && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 10, marginBottom: 20, background: "var(--line-soft)", padding: "10px 14px", borderRadius: 8 }}>
+            <DatoC label="Contacto" valor={cliente.contacto_nombre ?? "—"} />
+            {cliente.contacto_puesto && <DatoC label="Puesto" valor={cliente.contacto_puesto} />}
+            {cliente.contacto_telefono && <DatoC label="Tel. contacto" valor={cliente.contacto_telefono} />}
+            {cliente.contacto_email && <DatoC label="Email contacto" valor={cliente.contacto_email} />}
+          </div>
+        )}
 
         {/* Expediente por secciones */}
         <div style={{ marginBottom: 24 }}>
