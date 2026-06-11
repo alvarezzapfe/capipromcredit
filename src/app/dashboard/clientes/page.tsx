@@ -37,20 +37,33 @@ interface DocCliente {
   uploaded_at: string;
 }
 
-const TIPOS_DOC = [
-  "acta_constitutiva", "identificacion", "comprobante_domicilio",
-  "rfc_cedula", "estados_financieros", "poder_representante", "otro",
+// Secciones del expediente (orden de despliegue)
+const SECCIONES_DOC = [
+  { key: "estados_financieros", label: "Estados financieros", icon: "📊" },
+  { key: "acta_constitutiva", label: "Acta constitutiva", icon: "📄" },
+  { key: "constancia_situacion_fiscal", label: "Constancia de situación fiscal", icon: "🏛" },
+  { key: "opinion_cumplimiento", label: "Opinión de cumplimiento", icon: "✅" },
+  { key: "otro", label: "Otros documentos", icon: "📎" },
 ] as const;
 
 const LABEL_DOC: Record<string, string> = {
-  acta_constitutiva: "Acta constitutiva",
-  identificacion: "Identificación",
-  comprobante_domicilio: "Comprobante de domicilio",
-  rfc_cedula: "RFC / Cédula fiscal",
   estados_financieros: "Estados financieros",
-  poder_representante: "Poder del representante",
-  otro: "Otro",
+  acta_constitutiva: "Acta constitutiva",
+  constancia_situacion_fiscal: "Constancia de situación fiscal",
+  opinion_cumplimiento: "Opinión de cumplimiento",
+  // Legacy mappings
+  identificacion: "Otros documentos",
+  comprobante_domicilio: "Otros documentos",
+  rfc_cedula: "Otros documentos",
+  poder_representante: "Otros documentos",
+  otro: "Otros documentos",
 };
+
+// Normalize legacy tipo_documento to canonical keys
+function normalizarTipo(t: string): string {
+  if (["estados_financieros", "acta_constitutiva", "constancia_situacion_fiscal", "opinion_cumplimiento"].includes(t)) return t;
+  return "otro";
+}
 
 
 // =====================================================================
@@ -171,8 +184,7 @@ function ModalDetalleCliente({ cliente, isMobile, readOnly, onClose, onChanged }
   const [cargando, setCargando] = useState(true);
 
   // Upload state
-  const [tipoDoc, setTipoDoc] = useState<string>("identificacion");
-  const [subiendo, setSubiendo] = useState(false);
+  const [subiendo, setSubiendo] = useState<string | null>(null); // key of section being uploaded to
   const [errDoc, setErrDoc] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
@@ -189,30 +201,30 @@ function ModalDetalleCliente({ cliente, isMobile, readOnly, onClose, onChanged }
 
   useEffect(() => { cargar(); }, [cargar]);
 
-  async function subirArchivo(e: React.ChangeEvent<HTMLInputElement>) {
+  async function subirArchivo(tipo: string, e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setErrDoc(null);
-    setSubiendo(true);
+    setSubiendo(tipo);
 
     const supabase = createClient();
     const { data: userData } = await supabase.auth.getUser();
     const email = userData.user?.email ?? "sistema";
-    const path = `${cliente.id}/${Date.now()}_${file.name}`;
+    const path = `${cliente.id}/${tipo}/${Date.now()}_${file.name}`;
 
     const { error: upErr } = await supabase.storage.from("expedientes").upload(path, file);
-    if (upErr) { setSubiendo(false); setErrDoc("Error al subir: " + upErr.message); return; }
+    if (upErr) { setSubiendo(null); setErrDoc("Error al subir: " + upErr.message); return; }
 
     const { error: dbErr } = await supabase.from("documentos_cliente").insert({
       cliente_id: cliente.id,
-      tipo_documento: tipoDoc,
+      tipo_documento: tipo,
       nombre_archivo: file.name,
       storage_path: path,
       uploaded_by: email,
     });
-    if (dbErr) { setSubiendo(false); setErrDoc("Error al registrar: " + dbErr.message); return; }
+    if (dbErr) { setSubiendo(null); setErrDoc("Error al registrar: " + dbErr.message); return; }
 
-    setSubiendo(false);
+    setSubiendo(null);
     cargar();
     onChanged();
     e.target.value = "";
@@ -256,46 +268,62 @@ function ModalDetalleCliente({ cliente, isMobile, readOnly, onClose, onChanged }
           {cliente.domicilio && <DatoC label="Domicilio" valor={`${cliente.domicilio}${cliente.cp ? `, CP ${cliente.cp}` : ""}`} />}
         </div>
 
-        {/* Expediente */}
+        {/* Expediente por secciones */}
         <div style={{ marginBottom: 24 }}>
           <h3 style={{ fontSize: 16, fontWeight: 600, color: "#0a1628", marginBottom: 12 }}>Expediente</h3>
-          {!readOnly && (
-            <div style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap", marginBottom: 12 }}>
-              <div className="field" style={{ minWidth: 160 }}>
-                <label style={{ fontSize: 11 }}>Tipo</label>
-                <select className="select" value={tipoDoc} onChange={(e) => setTipoDoc(e.target.value)} style={{ fontSize: 12.5 }}>
-                  {TIPOS_DOC.map((t) => <option key={t} value={t}>{LABEL_DOC[t]}</option>)}
-                </select>
-              </div>
-              <label className="btn btn-ghost" style={{ cursor: "pointer", display: "inline-flex", fontSize: 12.5, padding: "8px 14px" }}>
-                <Upload size={14} strokeWidth={1.75} /> {subiendo ? "Subiendo…" : "Subir archivo"}
-                <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={subirArchivo} style={{ display: "none" }} disabled={subiendo} />
-              </label>
+          {errDoc && <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "8px 12px", borderRadius: 6, fontSize: 12.5, marginBottom: 12 }}>{errDoc}</div>}
+
+          {cargando ? <div style={{ padding: 24, textAlign: "center", color: "var(--text-faint)", fontSize: 13 }}>Cargando…</div>
+          : (
+            <div style={{ display: "grid", gap: 14 }}>
+              {SECCIONES_DOC.map((sec) => {
+                const secDocs = docs
+                  .filter((d) => normalizarTipo(d.tipo_documento) === sec.key)
+                  .sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));
+                const estaSubiendo = subiendo === sec.key;
+
+                return (
+                  <div key={sec.key} className="panel" style={{ padding: "14px 18px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: secDocs.length > 0 ? 10 : 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 16 }}>{sec.icon}</span>
+                        <span style={{ fontSize: 13.5, fontWeight: 600, color: "#0a1628" }}>{sec.label}</span>
+                        <span style={{ fontSize: 11, color: "var(--text-faint)" }}>({secDocs.length})</span>
+                      </div>
+                      {!readOnly && (
+                        <label className="btn btn-ghost" style={{ cursor: "pointer", display: "inline-flex", fontSize: 11.5, padding: "5px 10px", gap: 5 }}>
+                          <Upload size={12} strokeWidth={1.75} /> {estaSubiendo ? "Subiendo…" : "Subir"}
+                          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => subirArchivo(sec.key, e)} style={{ display: "none" }} disabled={!!subiendo} />
+                        </label>
+                      )}
+                    </div>
+
+                    {secDocs.length === 0 ? (
+                      <div style={{ fontSize: 12.5, color: "var(--text-faint)", padding: "6px 0" }}>Sin documento</div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 6 }}>
+                        {secDocs.map((d, i) => (
+                          <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", background: i === 0 ? "var(--amber-soft)" : "var(--line-soft)", borderRadius: 6 }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12.5, fontWeight: i === 0 ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.nombre_archivo}</div>
+                              <div style={{ fontSize: 10.5, color: "var(--text-faint)" }}>
+                                {new Date(d.uploaded_at).toLocaleDateString("es-MX")}
+                                {i === 0 && <span style={{ marginLeft: 6, color: "var(--amber)", fontWeight: 600 }}>Vigente</span>}
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                              <button className="btn btn-ghost" onClick={() => descargarDoc(d)} style={{ padding: "3px 7px", fontSize: 10.5 }}><Download size={11} /> Ver</button>
+                              {!readOnly && <button className="btn btn-ghost" onClick={() => eliminarDoc(d)} style={{ padding: "3px 7px", fontSize: 10.5, color: "var(--red)" }}><Trash2 size={11} /></button>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
-          {errDoc && <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "8px 12px", borderRadius: 6, fontSize: 12.5, marginBottom: 8 }}>{errDoc}</div>}
-          <div className="panel" style={{ overflow: "hidden" }}>
-            {cargando ? <div style={{ padding: 24, textAlign: "center", color: "var(--text-faint)", fontSize: 13 }}>Cargando…</div>
-            : docs.length === 0 ? <div style={{ padding: 24, textAlign: "center", color: "var(--text-faint)", fontSize: 13 }}>Sin documentos. Sube el primer archivo.</div>
-            : (
-              <table className="table" style={{ fontSize: 12.5 }}>
-                <thead><tr><th>Tipo</th><th>Archivo</th><th>Fecha</th><th></th></tr></thead>
-                <tbody>
-                  {docs.map((d) => (
-                    <tr key={d.id}>
-                      <td><span className="badge" style={{ background: "#f0f2f5", color: "#64748b", fontSize: 11 }}>{LABEL_DOC[d.tipo_documento] ?? d.tipo_documento}</span></td>
-                      <td style={{ fontSize: 12.5 }}>{d.nombre_archivo}</td>
-                      <td style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{new Date(d.uploaded_at).toLocaleDateString("es-MX")}</td>
-                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                        <button className="btn btn-ghost" onClick={() => descargarDoc(d)} style={{ padding: "4px 8px", fontSize: 11 }}><Download size={12} /> Ver</button>
-                        {!readOnly && <button className="btn btn-ghost" onClick={() => eliminarDoc(d)} style={{ padding: "4px 8px", fontSize: 11, color: "var(--red)" }}><Trash2 size={12} /></button>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
         </div>
 
         {/* Créditos ligados */}
