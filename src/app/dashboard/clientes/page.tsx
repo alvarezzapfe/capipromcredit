@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase-client";
 import { mxn, fecha as fmtFecha, TIPO_PRODUCTO_LABEL, labelEstatus } from "@/lib/format";
 import { ModalAltaCliente } from "@/components/ModalAltaCliente";
-import { UserCheck, Plus, Upload, Trash2, Download, Search } from "lucide-react";
+import { UserCheck, Plus, Upload, Trash2, Download, Search, FileBarChart2, ScrollText, Landmark, ShieldCheck, Files } from "lucide-react";
 import { useRol } from "@/lib/useRol";
 import { esSoloLectura } from "@/lib/rbac";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -39,11 +39,11 @@ interface DocCliente {
 
 // Secciones del expediente (orden de despliegue)
 const SECCIONES_DOC = [
-  { key: "estados_financieros", label: "Estados financieros", icon: "📊" },
-  { key: "acta_constitutiva", label: "Acta constitutiva", icon: "📄" },
-  { key: "constancia_situacion_fiscal", label: "Constancia de situación fiscal", icon: "🏛" },
-  { key: "opinion_cumplimiento", label: "Opinión de cumplimiento", icon: "✅" },
-  { key: "otro", label: "Otros documentos", icon: "📎" },
+  { key: "estados_financieros", label: "Estados financieros", Icon: FileBarChart2 },
+  { key: "acta_constitutiva", label: "Acta constitutiva", Icon: ScrollText },
+  { key: "constancia_situacion_fiscal", label: "Constancia de situación fiscal", Icon: Landmark },
+  { key: "opinion_cumplimiento", label: "Opinión de cumplimiento", Icon: ShieldCheck },
+  { key: "otro", label: "Otros documentos", Icon: Files },
 ] as const;
 
 const LABEL_DOC: Record<string, string> = {
@@ -286,7 +286,7 @@ function ModalDetalleCliente({ cliente, isMobile, readOnly, onClose, onChanged }
                   <div key={sec.key} className="panel" style={{ padding: "14px 18px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: secDocs.length > 0 ? 10 : 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 16 }}>{sec.icon}</span>
+                        <sec.Icon size={16} strokeWidth={1.75} style={{ color: "var(--amber)" }} />
                         <span style={{ fontSize: 13.5, fontWeight: 600, color: "#0a1628" }}>{sec.label}</span>
                         <span style={{ fontSize: 11, color: "var(--text-faint)" }}>({secDocs.length})</span>
                       </div>
