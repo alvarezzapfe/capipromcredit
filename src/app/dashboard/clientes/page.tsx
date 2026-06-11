@@ -183,10 +183,12 @@ export default function Clientes() {
 // =====================================================================
 // MODAL: Detalle de cliente (edición + expediente + créditos)
 // =====================================================================
-function ModalDetalleCliente({ cliente, isMobile, readOnly, onClose, onChanged }: { cliente: Cliente; isMobile?: boolean; readOnly: boolean; onClose: () => void; onChanged: () => void }) {
+function ModalDetalleCliente({ cliente: clienteInicial, isMobile, readOnly, onClose, onChanged }: { cliente: Cliente; isMobile?: boolean; readOnly: boolean; onClose: () => void; onChanged: () => void }) {
+  const [cliente, setCliente] = useState(clienteInicial);
   const [docs, setDocs] = useState<DocCliente[]>([]);
   const [creditos, setCreditos] = useState<any[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [mostrarEditar, setMostrarEditar] = useState(false);
 
   // Upload state
   const [subiendo, setSubiendo] = useState<string | null>(null); // key of section being uploaded to
@@ -195,10 +197,12 @@ function ModalDetalleCliente({ cliente, isMobile, readOnly, onClose, onChanged }
   const cargar = useCallback(async () => {
     setCargando(true);
     const supabase = createClient();
-    const [d, c] = await Promise.all([
+    const [cl, d, c] = await Promise.all([
+      supabase.from("clientes").select("*").eq("id", cliente.id).single(),
       supabase.from("documentos_cliente").select("*").eq("cliente_id", cliente.id).order("uploaded_at", { ascending: false }),
       supabase.from("creditos").select("id, folio, tipo_producto, monto, estatus").eq("cliente_id", cliente.id).order("created_at", { ascending: false }),
     ]);
+    if (cl.data) setCliente(cl.data as Cliente);
     setDocs((d.data ?? []) as DocCliente[]);
     setCreditos(c.data ?? []);
     setCargando(false);
@@ -281,7 +285,10 @@ function ModalDetalleCliente({ cliente, isMobile, readOnly, onClose, onChanged }
             <span className="badge" style={{ background: cliente.tipo_persona === "moral" ? "#e0f2fe" : "#faf5ff", color: cliente.tipo_persona === "moral" ? "#0284c7" : "#7c3aed", fontSize: 11, marginBottom: 6, display: "inline-block" }}>{cliente.tipo_persona === "moral" ? "Persona moral" : "Persona física"}</span>
             <h2 style={{ fontSize: 22, fontWeight: 600, color: "#0a1628", marginTop: 4 }}>{cliente.nombre}</h2>
           </div>
-          <button className="btn btn-ghost" onClick={onClose} style={{ padding: "8px 14px" }}>✕</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            {!readOnly && <button className="btn btn-ghost" onClick={() => setMostrarEditar(true)} style={{ padding: "8px 14px", fontSize: 12.5, color: "var(--amber)" }}>Editar</button>}
+            <button className="btn btn-ghost" onClick={onClose} style={{ padding: "8px 14px" }}>✕</button>
+          </div>
         </div>
 
         {/* Info */}
@@ -384,6 +391,7 @@ function ModalDetalleCliente({ cliente, isMobile, readOnly, onClose, onChanged }
               </table>
             )}
           </div>
+        {mostrarEditar && <ModalAltaCliente isMobile={isMobile} cliente={cliente} onClose={() => setMostrarEditar(false)} onSaved={() => { setMostrarEditar(false); cargar(); onChanged(); }} />}
         </div>
       </div>
     </div>

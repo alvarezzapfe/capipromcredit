@@ -13,55 +13,102 @@ function sanitize(s: string, max: number): string {
   return s.trim().slice(0, max);
 }
 
-const formVacio = {
-  tipo_persona: "moral" as "fisica" | "moral",
-  nombre: "", rfc: "", curp: "", email: "", telefono: "",
-  domicilio: "", cp: "", actividad: "",
-  representante_legal: "", fecha_constitucion: "", fecha_nacimiento: "",
-  notas: "",
-  fecha_alta: new Date().toISOString().slice(0, 10),
-  contacto_nombre: "", contacto_puesto: "", contacto_telefono: "", contacto_email: "",
-};
+export interface ClienteEditable {
+  id: string;
+  tipo_persona: "fisica" | "moral";
+  nombre: string;
+  rfc: string | null;
+  curp: string | null;
+  email: string | null;
+  telefono: string | null;
+  domicilio: string | null;
+  cp: string | null;
+  actividad: string | null;
+  representante_legal: string | null;
+  fecha_constitucion: string | null;
+  fecha_nacimiento: string | null;
+  notas: string | null;
+  fecha_alta: string | null;
+  contacto_nombre: string | null;
+  contacto_puesto: string | null;
+  contacto_telefono: string | null;
+  contacto_email: string | null;
+}
 
-export function ModalAltaCliente({ isMobile, onClose, onSaved, onCreated }: { isMobile?: boolean; onClose: () => void; onSaved: () => void; onCreated?: (cliente: any) => void }) {
-  const [form, setForm] = useState({ ...formVacio });
+function buildInitial(c?: ClienteEditable) {
+  if (!c) return {
+    tipo_persona: "moral" as "fisica" | "moral",
+    nombre: "", rfc: "", curp: "", email: "", telefono: "",
+    domicilio: "", cp: "", actividad: "",
+    representante_legal: "", fecha_constitucion: "", fecha_nacimiento: "",
+    notas: "",
+    fecha_alta: new Date().toISOString().slice(0, 10),
+    contacto_nombre: "", contacto_puesto: "", contacto_telefono: "", contacto_email: "",
+  };
+  return {
+    tipo_persona: c.tipo_persona,
+    nombre: c.nombre ?? "",
+    rfc: c.rfc ?? "",
+    curp: c.curp ?? "",
+    email: c.email ?? "",
+    telefono: c.telefono ?? "",
+    domicilio: c.domicilio ?? "",
+    cp: c.cp ?? "",
+    actividad: c.actividad ?? "",
+    representante_legal: c.representante_legal ?? "",
+    fecha_constitucion: c.fecha_constitucion ?? "",
+    fecha_nacimiento: c.fecha_nacimiento ?? "",
+    notas: c.notas ?? "",
+    fecha_alta: c.fecha_alta ?? new Date().toISOString().slice(0, 10),
+    contacto_nombre: c.contacto_nombre ?? "",
+    contacto_puesto: c.contacto_puesto ?? "",
+    contacto_telefono: c.contacto_telefono ?? "",
+    contacto_email: c.contacto_email ?? "",
+  };
+}
+
+interface Props {
+  isMobile?: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+  onCreated?: (cliente: any) => void;
+  cliente?: ClienteEditable; // if provided → edit mode
+}
+
+export function ModalAltaCliente({ isMobile, onClose, onSaved, onCreated, cliente }: Props) {
+  const editMode = !!cliente;
+  const [form, setForm] = useState(buildInitial(cliente));
   const [error, setError] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  async function guardar() {
-    setError(null);
+  function validar() {
     const nombre = sanitize(form.nombre, 200);
-    if (!nombre) { setError("Ingresa el nombre."); return; }
-
+    if (!nombre) return "Ingresa el nombre.";
     const rfc = sanitize(form.rfc, 13).toUpperCase();
-    if (rfc && !RE_RFC.test(rfc)) { setError("RFC inválido (formato: XAXX010101AAA)."); return; }
-
+    if (rfc && !RE_RFC.test(rfc)) return "RFC inválido (formato: XAXX010101AAA).";
     const curp = sanitize(form.curp, 18).toUpperCase();
-    if (curp && !RE_CURP.test(curp)) { setError("CURP inválido (18 caracteres alfanuméricos)."); return; }
-
+    if (curp && !RE_CURP.test(curp)) return "CURP inválido (18 caracteres alfanuméricos).";
     const email = sanitize(form.email, 254);
-    if (email && !RE_EMAIL.test(email)) { setError("Email inválido."); return; }
-
+    if (email && !RE_EMAIL.test(email)) return "Email inválido.";
     const telefono = sanitize(form.telefono, 20);
-    if (telefono && !RE_PHONE.test(telefono)) { setError("Teléfono: solo dígitos, espacios, +, -, ()."); return; }
-
+    if (telefono && !RE_PHONE.test(telefono)) return "Teléfono: solo dígitos, espacios, +, -, ().";
     const contactoEmail = sanitize(form.contacto_email, 254);
-    if (contactoEmail && !RE_EMAIL.test(contactoEmail)) { setError("Email de contacto inválido."); return; }
-
+    if (contactoEmail && !RE_EMAIL.test(contactoEmail)) return "Email de contacto inválido.";
     const contactoTel = sanitize(form.contacto_telefono, 20);
-    if (contactoTel && !RE_PHONE.test(contactoTel)) { setError("Teléfono de contacto inválido."); return; }
+    if (contactoTel && !RE_PHONE.test(contactoTel)) return "Teléfono de contacto inválido.";
+    return null;
+  }
 
-    setGuardando(true);
-    const supabase = createClient();
-    const { data, error: err } = await supabase.from("clientes").insert({
+  function buildPayload() {
+    return {
       tipo_persona: form.tipo_persona,
-      nombre,
-      rfc: rfc || null,
-      curp: form.tipo_persona === "fisica" ? (curp || null) : null,
-      email: email || null,
-      telefono: telefono || null,
+      nombre: sanitize(form.nombre, 200),
+      rfc: sanitize(form.rfc, 13).toUpperCase() || null,
+      curp: form.tipo_persona === "fisica" ? (sanitize(form.curp, 18).toUpperCase() || null) : null,
+      email: sanitize(form.email, 254) || null,
+      telefono: sanitize(form.telefono, 20) || null,
       domicilio: sanitize(form.domicilio, 300) || null,
       cp: sanitize(form.cp, 10) || null,
       actividad: sanitize(form.actividad, 200) || null,
@@ -72,17 +119,34 @@ export function ModalAltaCliente({ isMobile, onClose, onSaved, onCreated }: { is
       fecha_alta: form.fecha_alta || new Date().toISOString().slice(0, 10),
       contacto_nombre: sanitize(form.contacto_nombre, 200) || null,
       contacto_puesto: sanitize(form.contacto_puesto, 100) || null,
-      contacto_telefono: contactoTel || null,
-      contacto_email: contactoEmail || null,
-    }).select().single();
+      contacto_telefono: sanitize(form.contacto_telefono, 20) || null,
+      contacto_email: sanitize(form.contacto_email, 254) || null,
+    };
+  }
 
-    if (err || !data) { setGuardando(false); setError("Error: " + (err?.message ?? "")); return; }
+  async function guardar() {
+    setError(null);
+    const err = validar();
+    if (err) { setError(err); return; }
 
-    const { data: userData } = await supabase.auth.getUser();
-    await supabase.from("bitacora").insert({ entidad: "cliente", entidad_id: data.id, accion: "creado", detalle: { nombre: data.nombre }, usuario: userData.user?.email ?? "sistema" });
+    setGuardando(true);
+    const supabase = createClient();
+    const payload = buildPayload();
+
+    if (editMode) {
+      const { error: updErr } = await supabase.from("clientes").update(payload).eq("id", cliente!.id);
+      if (updErr) { setGuardando(false); setError("Error: " + updErr.message); return; }
+      const { data: userData } = await supabase.auth.getUser();
+      await supabase.from("bitacora").insert({ entidad: "cliente", entidad_id: cliente!.id, accion: "cliente_actualizado", detalle: { nombre: payload.nombre }, usuario: userData.user?.email ?? "sistema" });
+    } else {
+      const { data, error: insErr } = await supabase.from("clientes").insert(payload).select().single();
+      if (insErr || !data) { setGuardando(false); setError("Error: " + (insErr?.message ?? "")); return; }
+      const { data: userData } = await supabase.auth.getUser();
+      await supabase.from("bitacora").insert({ entidad: "cliente", entidad_id: data.id, accion: "creado", detalle: { nombre: data.nombre }, usuario: userData.user?.email ?? "sistema" });
+      if (onCreated) onCreated(data);
+    }
 
     setGuardando(false);
-    if (onCreated) onCreated(data);
     onSaved();
   }
 
@@ -93,7 +157,7 @@ export function ModalAltaCliente({ isMobile, onClose, onSaved, onCreated }: { is
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(10,22,40,0.4)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", zIndex: 200, padding: 24, overflowY: "auto" }}>
       <div onClick={(e) => e.stopPropagation()} className="panel" style={{ width: "100%", maxWidth: 560, padding: isMobile ? "24px 20px" : "30px 30px", maxHeight: "90vh", overflowY: "auto" }}>
-        <h2 style={{ fontSize: 20, fontWeight: 600, color: "#0a1628", marginBottom: 16 }}>Nuevo cliente</h2>
+        <h2 style={{ fontSize: 20, fontWeight: 600, color: "#0a1628", marginBottom: 16 }}>{editMode ? "Editar cliente" : "Nuevo cliente"}</h2>
         <div style={{ display: "grid", gap: 12 }}>
           {sectionTitle("Tipo de persona")}
           <div style={{ display: "flex", gap: 6 }}>
@@ -144,7 +208,7 @@ export function ModalAltaCliente({ isMobile, onClose, onSaved, onCreated }: { is
           {error && <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "10px 14px", borderRadius: 6, fontSize: 13.5 }}>{error}</div>}
           <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
             <button className="btn btn-ghost" onClick={onClose} style={{ flex: 1 }}>Cancelar</button>
-            <button className="btn btn-primary" onClick={guardar} disabled={guardando} style={{ flex: 1 }}>{guardando ? "Guardando…" : "Guardar"}</button>
+            <button className="btn btn-primary" onClick={guardar} disabled={guardando} style={{ flex: 1 }}>{guardando ? "Guardando…" : (editMode ? "Guardar cambios" : "Guardar")}</button>
           </div>
         </div>
       </div>
