@@ -15,6 +15,7 @@ import { useRol } from "@/lib/useRol";
 import { esSoloLectura, puedeEliminar, puedeEliminarDesdeTabla, type Rol } from "@/lib/rbac";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { ModalAltaCliente } from "@/components/ModalAltaCliente";
+import { rateLabel } from "@/lib/credit-engine/rate-label";
 
 interface Credito {
   id: string;
@@ -48,6 +49,10 @@ interface Credito {
   tasa_descuento: number | null;
   comision_pct: number | null;
   fecha_vencimiento: string | null;
+  rate_type: string | null;
+  spread: number | null;
+  fixed_rate: number | null;
+  day_count_base: number;
 }
 
 interface Disposicion {
@@ -60,12 +65,11 @@ interface Disposicion {
 
 
 function tasaLabel(c: Credito): string {
-  const pctVal = (Number(c.tasa_anual) * 100).toFixed(2) + "%";
-  if (c.tipo_tasa === "variable" && c.tasa_referencia) {
-    const ref = c.tasa_referencia.replace("_", " ");
-    return `${ref} + ${Number(c.spread_pp ?? 0).toFixed(2)}pp`;
-  }
-  return `${pctVal} fija`;
+  return rateLabel({
+    rate_type: c.rate_type,
+    spread: c.spread != null ? Number(c.spread) : null,
+    fixed_rate: c.fixed_rate != null ? Number(c.fixed_rate) : null,
+  });
 }
 
 function graciaLabel(c: Credito): string {
@@ -906,7 +910,7 @@ function ModalAlta({ onClose, onSaved, isMobile }: { onClose: () => void; onSave
       ) : (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-            <div className="field"><label>Referencia</label><select className="select" value={form.tasa_referencia} onChange={(e) => set("tasa_referencia", e.target.value)}><option value="TIIE_28">TIIE 28d</option><option value="TIIE_91">TIIE 91d</option><option value="TIIE_182">TIIE 182d</option></select></div>
+            <div className="field"><label>Referencia</label><select className="select" value={form.tasa_referencia} onChange={(e) => set("tasa_referencia", e.target.value)}><option value="TIIE_28">TIIE 28d</option><option value="TIIE_FONDEO">TIIE Fondeo</option><option value="TIIE_91">TIIE 91d</option><option value="TIIE_182">TIIE 182d</option></select></div>
             <div className="field"><label>Valor ref (%)</label><input className="input mono" type="number" value={form.valor_referencia} onChange={(e) => set("valor_referencia", e.target.value)} placeholder="10.50" /></div>
             <div className="field"><label>Spread (pp)</label><input className="input mono" type="number" value={form.spread_pp} onChange={(e) => set("spread_pp", e.target.value)} placeholder="4.50" /></div>
           </div>
@@ -1694,7 +1698,7 @@ function ModalReestructura({ credito, amort, isMobile, onClose, onDone }: { cred
             <div className="field"><label>Tasa anual (%) *</label><input className="input mono" type="number" value={form.tasa_anual} onChange={(e) => set("tasa_anual", e.target.value)} placeholder="24" /></div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-              <div className="field"><label>Referencia</label><select className="select" value={form.tasa_referencia} onChange={(e) => set("tasa_referencia", e.target.value)}><option value="TIIE_28">TIIE 28d</option><option value="TIIE_91">TIIE 91d</option><option value="TIIE_182">TIIE 182d</option></select></div>
+              <div className="field"><label>Referencia</label><select className="select" value={form.tasa_referencia} onChange={(e) => set("tasa_referencia", e.target.value)}><option value="TIIE_28">TIIE 28d</option><option value="TIIE_FONDEO">TIIE Fondeo</option><option value="TIIE_91">TIIE 91d</option><option value="TIIE_182">TIIE 182d</option></select></div>
               <div className="field"><label>Valor ref (%)</label><input className="input mono" type="number" value={form.valor_referencia} onChange={(e) => set("valor_referencia", e.target.value)} placeholder="10.50" /></div>
               <div className="field"><label>Spread (pp)</label><input className="input mono" type="number" value={form.spread_pp} onChange={(e) => set("spread_pp", e.target.value)} placeholder="4.50" /></div>
             </div>

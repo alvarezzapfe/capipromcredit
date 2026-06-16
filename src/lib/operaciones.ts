@@ -129,6 +129,10 @@ export function construirOperacion(input: InputOperacion): ResultadoOperacion {
       tasa_referencia: null,
       valor_referencia: null,
       spread_pp: null,
+      rate_type: null,
+      spread: null,
+      fixed_rate: tasaDesc / 100,
+      day_count_base: 360,
       tipo_garantia: input.tipo_garantia || "quirografaria",
       periodo_gracia_meses: 0,
       tipo_gracia: "ninguna",
@@ -188,6 +192,13 @@ export function construirOperacion(input: InputOperacion): ResultadoOperacion {
           : null,
       spread_pp:
         input.tipo_tasa === "variable" ? (input.spread_pp ?? 0) / 100 : null,
+      rate_type:
+        input.tipo_tasa === "variable" ? (input.tasa_referencia ?? null) : null,
+      spread:
+        input.tipo_tasa === "variable" ? (input.spread_pp ?? 0) / 100 : null,
+      fixed_rate:
+        input.tipo_tasa !== "variable" ? tasaFinal : null,
+      day_count_base: 360,
       tipo_garantia: input.tipo_garantia || "quirografaria",
       periodo_gracia_meses: 0,
       tipo_gracia: "ninguna",
@@ -269,6 +280,13 @@ export function construirOperacion(input: InputOperacion): ResultadoOperacion {
         : null,
     spread_pp:
       input.tipo_tasa === "variable" ? (input.spread_pp ?? 0) / 100 : null,
+    rate_type:
+      input.tipo_tasa === "variable" ? (input.tasa_referencia ?? null) : null,
+    spread:
+      input.tipo_tasa === "variable" ? (input.spread_pp ?? 0) / 100 : null,
+    fixed_rate:
+      input.tipo_tasa !== "variable" ? tasaFinal : null,
+    day_count_base: 360,
     tipo_garantia:
       input.tipo_garantia ||
       (esArr ? "bien_arrendado" : "quirografaria"),

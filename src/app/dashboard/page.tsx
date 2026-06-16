@@ -53,6 +53,7 @@ export default function Resumen() {
   const [proximos, setProximos] = useState<CuponView[]>([]);
   const [amortRows, setAmortRows] = useState<AmortMin[]>([]);
   const [creditoRows, setCreditoRows] = useState<CreditoMin[]>([]);
+  const [rateChip, setRateChip] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -101,6 +102,18 @@ export default function Resumen() {
       setProximos(cupones);
       setAmortRows(amort);
       setCreditoRows(creditos.map((c) => ({ id: c.id, acreditado: c.acreditado, estatus: c.estatus })));
+
+      // Rate chip: latest rate for TIIE 28 and Fondeo
+      const [{ data: tiie28 }, { data: fondeo }] = await Promise.all([
+        sb.from("rate_catalog").select("rate_value").eq("rate_type", "TIIE_28").order("rate_date", { ascending: false }).limit(1),
+        sb.from("rate_catalog").select("rate_value").eq("rate_type", "TIIE_FONDEO").order("rate_date", { ascending: false }).limit(1),
+      ]);
+      const pct4 = (v: number) => (v * 100).toFixed(4) + "%";
+      const chipParts: string[] = [];
+      if (tiie28?.[0]) chipParts.push(`TIIE 28d ${pct4(Number(tiie28[0].rate_value))}`);
+      if (fondeo?.[0]) chipParts.push(`Fondeo ${pct4(Number(fondeo[0].rate_value))}`);
+      if (chipParts.length) setRateChip(chipParts.join(" · "));
+
       setCargando(false);
     })();
   }, []);
@@ -145,9 +158,16 @@ export default function Resumen() {
     <div style={{ padding: m ? "20px 16px 40px" : "32px 48px 60px" }}>
       {/* Header */}
       <header style={{ marginBottom: m ? 18 : 28 }}>
-        <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 500, letterSpacing: "-0.02em", fontSize: m ? 22 : 30, color: "#0a1628", marginBottom: 4 }}>
-          Resumen de cartera
-        </h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 4 }}>
+          <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 500, letterSpacing: "-0.02em", fontSize: m ? 22 : 30, color: "#0a1628" }}>
+            Resumen de cartera
+          </h1>
+          {rateChip && (
+            <span className="mono" style={{ fontSize: 11, color: "#5b6b80", background: "#f4f1eb", border: "1px solid #e4dfd5", borderRadius: 6, padding: "3px 10px", whiteSpace: "nowrap" }}>
+              {rateChip}
+            </span>
+          )}
+        </div>
         <p style={{ fontFamily: "var(--font-body)", color: "#5b6b80", fontSize: m ? 13 : 14 }}>
           Vista general de tu operación de crédito.
         </p>
