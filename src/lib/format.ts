@@ -19,6 +19,7 @@ export const fecha = (iso: string) =>
   });
 
 export const ESTATUS_CREDITO = [
+  "borrador",
   "vigente",
   "en_mora",
   "vencido",
@@ -36,6 +37,7 @@ export const ESTATUS_SOLICITUD = [
 ] as const;
 
 export const labelEstatus: Record<string, string> = {
+  borrador: "Por revisar",
   vigente: "Vigente",
   en_mora: "En mora",
   vencido: "Vencido",

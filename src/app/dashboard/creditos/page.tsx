@@ -3,10 +3,11 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase-client";
 import { mxn, labelEstatus, ESTATUS_SOLICITUD } from "@/lib/format";
-import { Inbox, Plus } from "lucide-react";
+import { Inbox, Plus, ArrowRightCircle, Undo2 } from "lucide-react";
 import { useRol } from "@/lib/useRol";
 import { esSoloLectura } from "@/lib/rbac";
 import { useIsMobile } from "@/lib/useIsMobile";
+import Link from "next/link";
 
 interface Solicitud {
   id: string;
@@ -19,6 +20,8 @@ interface Solicitud {
   destino: string | null;
   estatus: string;
   created_at: string;
+  credito_id: string | null;
+  folio_credito?: string | null;
 }
 
 const formVacio = { nombre: "", email: "", telefono: "", rfc: "", monto_solicitado: "", plazo_meses: "", destino: "" };
@@ -32,6 +35,8 @@ export default function Solicitudes() {
   const [filtro, setFiltro] = useState<string>("todas");
 
   const [errCambio, setErrCambio] = useState<string | null>(null);
+  const [msgExito, setMsgExito] = useState<string | null>(null);
+  const [convirtiendo, setConvirtiendo] = useState<string | null>(null); // solicitud_id en proceso
 
   // Modal nueva solicitud
   const [modal, setModal] = useState(false);
@@ -48,7 +53,23 @@ export default function Solicitudes() {
       .from("solicitudes")
       .select("*")
       .order("created_at", { ascending: false });
-    setSolicitudes((data ?? []) as Solicitud[]);
+
+    // Enrich convertidas with folio
+    const sols = (data ?? []) as Solicitud[];
+    const convertidas = sols.filter((s) => s.credito_id);
+    if (convertidas.length > 0) {
+      const ids = convertidas.map((s) => s.credito_id!);
+      const { data: creds } = await supabase
+        .from("creditos")
+        .select("id, folio")
+        .in("id", ids);
+      const folioMap = new Map((creds ?? []).map((c: any) => [c.id, c.folio]));
+      for (const s of sols) {
+        if (s.credito_id) s.folio_credito = folioMap.get(s.credito_id) ?? null;
+      }
+    }
+
+    setSolicitudes(sols);
     setCargando(false);
   }, []);
 
@@ -56,10 +77,28 @@ export default function Solicitudes() {
     cargar();
   }, [cargar]);
 
-  async function cambiar(id: string, estatus: string) {
+  async function cambiar(id: string, nuevoEstatus: string) {
     setErrCambio(null);
+    setMsgExito(null);
+
+    // Si pasa a "aprobada", ofrecer conversión directa
+    if (nuevoEstatus === "aprobada") {
+      const supabase = createClient();
+      const { error: errUpd } = await supabase.from("solicitudes").update({ estatus: nuevoEstatus }).eq("id", id);
+      if (errUpd) { setErrCambio("Error al actualizar: " + errUpd.message); setTimeout(() => setErrCambio(null), 6000); return; }
+      const { data: userData } = await supabase.auth.getUser();
+      await supabase.from("bitacora").insert({ entidad: "solicitud", entidad_id: id, accion: "cambio_estatus", detalle: { a: nuevoEstatus }, usuario: userData.user?.email ?? "sistema" });
+      await cargar();
+
+      // Ofrecer convertir inmediatamente
+      if (confirm("Solicitud aprobada. ¿Convertir a crédito borrador en cartera? (Los términos se podrán editar antes de activar)")) {
+        await convertir(id);
+      }
+      return;
+    }
+
     const supabase = createClient();
-    const { error: errUpd } = await supabase.from("solicitudes").update({ estatus }).eq("id", id);
+    const { error: errUpd } = await supabase.from("solicitudes").update({ estatus: nuevoEstatus }).eq("id", id);
     if (errUpd) {
       setErrCambio("Error al actualizar: " + errUpd.message);
       setTimeout(() => setErrCambio(null), 6000);
@@ -70,9 +109,44 @@ export default function Solicitudes() {
       entidad: "solicitud",
       entidad_id: id,
       accion: "cambio_estatus",
-      detalle: { a: estatus },
+      detalle: { a: nuevoEstatus },
       usuario: userData.user?.email ?? "sistema",
     });
+    cargar();
+  }
+
+  async function convertir(solicitudId: string) {
+    setErrCambio(null);
+    setMsgExito(null);
+    setConvirtiendo(solicitudId);
+    const supabase = createClient();
+    const { data, error } = await supabase.rpc("convertir_solicitud_a_credito", { p_solicitud_id: solicitudId });
+    setConvirtiendo(null);
+
+    if (error) {
+      setErrCambio("Error al convertir: " + error.message);
+      setTimeout(() => setErrCambio(null), 8000);
+      return;
+    }
+    const folio = (data as any)?.folio ?? "";
+    setMsgExito(`Crédito ${folio} creado como borrador. Edita los términos en Cartera y actívalo.`);
+    setTimeout(() => setMsgExito(null), 10000);
+    cargar();
+  }
+
+  async function anularConversion(solicitudId: string) {
+    if (!confirm("¿Anular la conversión? El crédito borrador se cancelará y la solicitud volverá a 'Aprobada'.")) return;
+    setErrCambio(null);
+    setMsgExito(null);
+    const supabase = createClient();
+    const { error } = await supabase.rpc("anular_conversion_solicitud", { p_solicitud_id: solicitudId });
+    if (error) {
+      setErrCambio("Error al anular: " + error.message);
+      setTimeout(() => setErrCambio(null), 8000);
+      return;
+    }
+    setMsgExito("Conversión anulada. La solicitud volvió a 'Aprobada'.");
+    setTimeout(() => setMsgExito(null), 8000);
     cargar();
   }
 
@@ -117,9 +191,10 @@ export default function Solicitudes() {
     cargar();
   }
 
+  // Filter: "todas" excluye convertidas; "convertida" es pestaña aparte
   const filtradas =
     filtro === "todas"
-      ? solicitudes
+      ? solicitudes.filter((s) => s.estatus !== "convertida")
       : solicitudes.filter((s) => s.estatus === filtro);
 
   return (
@@ -141,7 +216,9 @@ export default function Solicitudes() {
       <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
         {["todas", ...ESTATUS_SOLICITUD].map((f) => {
           const activo = filtro === f;
-          const count = f === "todas" ? solicitudes.length : solicitudes.filter((s) => s.estatus === f).length;
+          const count = f === "todas"
+            ? solicitudes.filter((s) => s.estatus !== "convertida").length
+            : solicitudes.filter((s) => s.estatus === f).length;
           return (
             <button
               key={f}
@@ -183,6 +260,9 @@ export default function Solicitudes() {
 
       {errCambio && (
         <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "11px 16px", borderRadius: 6, fontSize: 13.5, marginBottom: 18 }}>{errCambio}</div>
+      )}
+      {msgExito && (
+        <div style={{ background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", padding: "11px 16px", borderRadius: 6, fontSize: 13.5, marginBottom: 18 }}>{msgExito}</div>
       )}
 
       <div className="panel" style={{ overflow: "hidden" }}>
@@ -235,7 +315,60 @@ export default function Solicitudes() {
                     <span className={`badge badge-${s.estatus}`}>{labelEstatus[s.estatus]}</span>
                   </td>
                   <td>
-                    {readOnly ? (
+                    {s.estatus === "convertida" ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {s.folio_credito ? (
+                          <Link
+                            href="/dashboard/cartera"
+                            style={{ fontSize: 12.5, color: "#c8841f", fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4 }}
+                          >
+                            Ver {s.folio_credito} <ArrowRightCircle size={13} />
+                          </Link>
+                        ) : (
+                          <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>Convertida</span>
+                        )}
+                        {rol === "super_admin" && (
+                          <button
+                            onClick={() => anularConversion(s.id)}
+                            title="Anular conversión (super_admin)"
+                            style={{ background: "none", border: "none", cursor: "pointer", padding: 2, color: "#94a3b8" }}
+                          >
+                            <Undo2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    ) : s.estatus === "aprobada" && !s.credito_id ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {readOnly ? (
+                          <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>—</span>
+                        ) : (
+                          <>
+                            <select
+                              className="select"
+                              value={s.estatus}
+                              onChange={(e) => cambiar(s.id, e.target.value)}
+                              style={{ padding: "6px 10px", fontSize: 12.5, width: "auto" }}
+                            >
+                              {ESTATUS_SOLICITUD.filter((es) => es !== "convertida").map((es) => (
+                                <option key={es} value={es}>{labelEstatus[es]}</option>
+                              ))}
+                            </select>
+                            <button
+                              className="btn btn-primary"
+                              onClick={() => {
+                                if (confirm("Esto creará el crédito en cartera con términos default por revisar. ¿Continuar?")) {
+                                  convertir(s.id);
+                                }
+                              }}
+                              disabled={convirtiendo === s.id}
+                              style={{ padding: "5px 12px", fontSize: 12, whiteSpace: "nowrap" }}
+                            >
+                              {convirtiendo === s.id ? "Convirtiendo…" : "Convertir a crédito"}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    ) : readOnly ? (
                       <span style={{ fontSize: 12.5, color: "var(--text-faint)" }}>—</span>
                     ) : (
                       <select
@@ -244,7 +377,7 @@ export default function Solicitudes() {
                         onChange={(e) => cambiar(s.id, e.target.value)}
                         style={{ padding: "6px 10px", fontSize: 12.5, width: "auto" }}
                       >
-                        {ESTATUS_SOLICITUD.map((es) => (
+                        {ESTATUS_SOLICITUD.filter((es) => es !== "convertida").map((es) => (
                           <option key={es} value={es}>{labelEstatus[es]}</option>
                         ))}
                       </select>
@@ -257,10 +390,6 @@ export default function Solicitudes() {
           </div>
         )}
       </div>
-
-      <p style={{ color: "var(--text-faint)", fontSize: 12.5, marginTop: 16 }}>
-        Para convertir una solicitud aprobada en crédito, ve a <strong>Cartera → Originar crédito</strong> y captura los datos finales (tasa, método de amortización, etc.).
-      </p>
 
       {/* ---- Modal: Nueva solicitud ---- */}
       {modal && (

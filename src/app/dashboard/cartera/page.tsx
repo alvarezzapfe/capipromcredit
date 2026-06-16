@@ -131,7 +131,7 @@ export default function Cartera() {
     const { data: userData } = await supabase.auth.getUser();
     const operador = userData.user?.email ?? "sistema";
 
-    const { data: todos } = await supabase.from("creditos").select("*").neq("tipo_producto", "linea_revolvente");
+    const { data: todos } = await supabase.from("creditos").select("*").neq("tipo_producto", "linea_revolvente").neq("estatus", "borrador");
     if (!todos || todos.length === 0) { setReparando(false); setAvisoRepair("No hay créditos para revisar."); return; }
 
     let reparados = 0;
@@ -211,7 +211,12 @@ export default function Cartera() {
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: isMobile ? "flex-start" : "flex-end", marginBottom: isMobile ? 20 : 28, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h1 className="display" style={{ fontSize: 32, marginBottom: 6 }}>Cartera de crédito</h1>
-          <p style={{ color: "var(--text-dim)", marginTop: 4 }}>{creditos.length} crédito{creditos.length === 1 ? "" : "s"} en cartera.</p>
+          <p style={{ color: "var(--text-dim)", marginTop: 4 }}>
+            {creditos.filter(c => c.estatus !== "borrador").length} crédito{creditos.filter(c => c.estatus !== "borrador").length === 1 ? "" : "s"} en cartera
+            {creditos.filter(c => c.estatus === "borrador").length > 0 && (
+              <span style={{ color: "var(--amber)" }}> · {creditos.filter(c => c.estatus === "borrador").length} por revisar</span>
+            )}
+          </p>
         </div>
         {!readOnly && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1374,9 +1379,14 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
           </div>
         )}
 
-        {!readOnly && <div className="panel" style={{ padding: "16px 18px", marginBottom: 20, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        {/* Borrador: banner de activación */}
+        {credito.estatus === "borrador" && !readOnly && (
+          <BorradorActivar credito={credito} onActivated={() => { onChanged(); cargar(); }} isMobile={isMobile} />
+        )}
+
+        {!readOnly && credito.estatus !== "borrador" && <div className="panel" style={{ padding: "16px 18px", marginBottom: 20, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <span style={{ fontSize: 13, color: "var(--text-dim)", fontWeight: 600 }}>Estatus:</span>
-          <select className="select" value={estatus} onChange={(e) => setEstatus(e.target.value)} style={{ width: "auto", minWidth: 160 }}>{ESTATUS_CREDITO.map((s) => <option key={s} value={s}>{labelEstatus[s]}</option>)}</select>
+          <select className="select" value={estatus} onChange={(e) => setEstatus(e.target.value)} style={{ width: "auto", minWidth: 160 }}>{ESTATUS_CREDITO.filter(s => s !== "borrador").map((s) => <option key={s} value={s}>{labelEstatus[s]}</option>)}</select>
           <button className="btn btn-primary" onClick={cambiarEstatus} disabled={estatus === credito.estatus || guardando} style={{ padding: "9px 16px", fontSize: 13, opacity: estatus === credito.estatus ? 0.5 : 1 }}>{guardando ? "Guardando…" : "Actualizar"}</button>
         </div>}
 
@@ -1921,6 +1931,144 @@ function ModalConfirmarEliminacion({ credito, onClose, onDeleted }: { credito: C
         {error && <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "10px 14px", borderRadius: 6, fontSize: 13, marginBottom: 16 }}>{error}</div>}
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}><button className="btn btn-ghost" onClick={onClose}>Cancelar</button><button className="btn btn-danger" onClick={confirmar} disabled={!ok} style={{ opacity: ok ? 1 : 0.45 }}>{eliminando ? "Eliminando…" : "Eliminar definitivamente"}</button></div>
       </div>
+    </div>
+  );
+}
+
+// ── Borrador → Activar (valida y genera amortización) ──
+function BorradorActivar({ credito, onActivated, isMobile }: { credito: Credito; onActivated: () => void; isMobile?: boolean }) {
+  const [activando, setActivando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function activar() {
+    setError(null);
+
+    // Validaciones
+    const tasaEfectiva = credito.rate_type
+      ? (Number(credito.spread ?? 0))
+      : Number(credito.fixed_rate ?? 0);
+    if (tasaEfectiva <= 0 && !credito.rate_type) {
+      setError("Configura la tasa antes de activar. Edita el crédito en Cartera.");
+      return;
+    }
+    if (credito.rate_type && (credito.spread == null || Number(credito.spread) <= 0)) {
+      setError("Configura el spread antes de activar.");
+      return;
+    }
+    if (!credito.metodo_amort) {
+      setError("Selecciona un método de amortización.");
+      return;
+    }
+    if (!credito.fecha_origen) {
+      setError("Configura la fecha de disposición.");
+      return;
+    }
+
+    if (!confirm("¿Activar este crédito? Se generará la tabla de amortización y pasará a Vigente.")) return;
+
+    setActivando(true);
+    const supabase = createClient();
+    const { data: userData } = await supabase.auth.getUser();
+    const operador = userData.user?.email ?? "sistema";
+
+    try {
+      // Compute tasa_anual for the credit row
+      const tasaAnualDecimal = credito.rate_type
+        ? Number(credito.tasa_anual) // Should be set during edit, or we recalculate
+        : Number(credito.fixed_rate ?? 0);
+
+      // Build input for amortization
+      const tp = credito.tipo_producto as TipoProducto;
+      const esArr = tp === "arrendamiento_financiero" || tp === "arrendamiento_puro";
+      const input: InputOperacion = {
+        tipo_producto: tp,
+        folio: credito.folio,
+        acreditado: credito.acreditado,
+        rfc: credito.rfc ?? undefined,
+        fecha_origen: credito.fecha_origen,
+        monto: Number(credito.monto) || 0,
+        tipo_tasa: credito.rate_type ? "variable" : "fija",
+        tasa_anual_pct: tasaAnualDecimal * 100,
+        tasa_referencia: credito.tasa_referencia ?? undefined,
+        valor_referencia_pct: credito.valor_referencia != null ? Number(credito.valor_referencia) * 100 : 0,
+        spread_pp: credito.spread_pp != null ? Number(credito.spread_pp) * 100 : 0,
+        plazo_meses: Number(credito.plazo_meses) || 0,
+        frecuencia: (credito.frecuencia || "mensual") as Frecuencia,
+        metodo_amort: (credito.metodo_amort || "frances") as MetodoAmort,
+        tipo_garantia: credito.tipo_garantia ?? undefined,
+        periodo_gracia_meses: Number(credito.periodo_gracia_meses) || 0,
+        tipo_gracia: (credito.tipo_gracia || "ninguna") as TipoGracia,
+        tipo_disposicion: "unica",
+        valor_bien: esArr ? Number(credito.valor_bien ?? 0) : 0,
+        enganche: esArr ? Number(credito.enganche ?? 0) : 0,
+        valor_residual: esArr ? Number(credito.valor_residual ?? 0) : 0,
+      };
+
+      const resultado = construirOperacion(input);
+      const { cupones } = resultado;
+
+      // Insert amortization
+      if (cupones.length > 0) {
+        await supabase.from("amortizacion").insert(
+          cupones.map((c) => ({
+            credito_id: credito.id,
+            numero_cupon: c.numero_cupon,
+            fecha_pago: c.fecha_pago,
+            saldo_inicial: c.saldo_inicial,
+            capital: c.capital,
+            interes: c.interes,
+            pago_total: c.pago_total,
+            saldo_final: c.saldo_final,
+            ...(c.valor_referencia != null ? { valor_referencia: c.valor_referencia } : {}),
+            ...(c.tasa_aplicada != null ? { tasa_aplicada: c.tasa_aplicada } : {}),
+          }))
+        );
+      }
+
+      // Insert initial disposition
+      await supabase.from("disposiciones").insert({
+        credito_id: credito.id,
+        numero: 1,
+        monto: Number(credito.monto),
+        fecha: credito.fecha_origen,
+      });
+
+      // Update status to vigente
+      await supabase.from("creditos").update({ estatus: "vigente" }).eq("id", credito.id);
+
+      // Audit trail
+      await supabase.from("bitacora").insert({
+        entidad: "credito",
+        entidad_id: credito.id,
+        accion: "activado",
+        detalle: { de: "borrador", a: "vigente", cupones: cupones.length },
+        usuario: operador,
+      });
+
+      setActivando(false);
+      onActivated();
+    } catch (e: any) {
+      setActivando(false);
+      setError("Error al activar: " + e.message);
+    }
+  }
+
+  return (
+    <div className="panel" style={{ padding: "16px 20px", marginBottom: 20, background: "#fffbeb", border: "1px solid #fde68a" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#92400e", marginBottom: 4 }}>Crédito en borrador</div>
+          <div style={{ fontSize: 13, color: "#a16207" }}>
+            Revisa los términos (tasa, método, fecha) y activa para generar la tabla de amortización.
+          </div>
+        </div>
+        <button className="btn btn-primary" onClick={activar} disabled={activando} style={{ padding: "9px 18px", fontSize: 13, whiteSpace: "nowrap" }}>
+          {activando ? "Activando…" : "Activar crédito"}
+        </button>
+      </div>
+      {error && (
+        <div style={{ marginTop: 10, background: "var(--red-soft)", color: "var(--red)", padding: "8px 12px", borderRadius: 6, fontSize: 13 }}>{error}</div>
+      )}
     </div>
   );
 }
