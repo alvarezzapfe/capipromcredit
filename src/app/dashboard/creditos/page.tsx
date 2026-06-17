@@ -124,8 +124,8 @@ export default function Solicitudes() {
     setConvirtiendo(null);
 
     if (error) {
-      setErrCambio("Error al convertir: " + error.message);
-      setTimeout(() => setErrCambio(null), 8000);
+      console.error("RPC convertir_solicitud_a_credito falló:", error);
+      setErrCambio("Error al convertir: " + error.message + (error.hint ? ` (hint: ${error.hint})` : "") + (error.code ? ` [${error.code}]` : ""));
       return;
     }
     const folio = (data as any)?.folio ?? "";
@@ -141,8 +141,8 @@ export default function Solicitudes() {
     const supabase = createClient();
     const { error } = await supabase.rpc("anular_conversion_solicitud", { p_solicitud_id: solicitudId });
     if (error) {
-      setErrCambio("Error al anular: " + error.message);
-      setTimeout(() => setErrCambio(null), 8000);
+      console.error("RPC anular_conversion_solicitud falló:", error);
+      setErrCambio("Error al anular: " + error.message + (error.hint ? ` (hint: ${error.hint})` : "") + (error.code ? ` [${error.code}]` : ""));
       return;
     }
     setMsgExito("Conversión anulada. La solicitud volvió a 'Aprobada'.");
@@ -259,7 +259,10 @@ export default function Solicitudes() {
       </div>
 
       {errCambio && (
-        <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "11px 16px", borderRadius: 6, fontSize: 13.5, marginBottom: 18 }}>{errCambio}</div>
+        <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "11px 16px", borderRadius: 6, fontSize: 13.5, marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+          <span>{errCambio}</span>
+          <button onClick={() => setErrCambio(null)} style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", fontWeight: 700, fontSize: 15, lineHeight: 1, padding: 0, flexShrink: 0 }}>✕</button>
+        </div>
       )}
       {msgExito && (
         <div style={{ background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", padding: "11px 16px", borderRadius: 6, fontSize: 13.5, marginBottom: 18 }}>{msgExito}</div>
