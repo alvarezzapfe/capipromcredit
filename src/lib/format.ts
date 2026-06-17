@@ -67,6 +67,35 @@ export const TIPO_PRODUCTO_FULL: Record<string, string> = {
   linea_revolvente: "Línea Revolvente",
 };
 
+export const FRECUENCIA_WIZARD_LABEL: Record<string, string> = {
+  mensual: "Mensual",
+  bimestral: "Bimestral",
+  trimestral: "Trimestral",
+  cuatrimestral: "Cuatrimestral",
+  semestral: "Semestral",
+  anual: "Anual",
+};
+
+export const ESQUEMA_LABEL: Record<string, string> = {
+  frances: "Francesa",
+  lineal: "Lineal (Decreciente)",
+  bullet: "Bullet",
+  creciente: "Creciente",
+  int_capdif: "Int. periódico + K diferido",
+};
+
+export const CONVENCION_LABEL: Record<string, string> = {
+  "ACT/360": "ACT/360",
+  "ACT/365": "ACT/365",
+  "30E/360": "30E/360",
+};
+
+export const GRACIA_WIZARD_LABEL: Record<string, string> = {
+  sin_pago: "Sin pago",
+  solo_interes: "Solo interés",
+  capitaliza_interes: "Capitaliza interés",
+};
+
 export const GARANTIA_LABEL: Record<string, string> = {
   quirografaria: "Quirografaria",
   fideicomiso_flujo: "Fideicomiso",

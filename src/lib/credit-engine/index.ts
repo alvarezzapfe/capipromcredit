@@ -8,3 +8,24 @@ export {
   type CreditRateConfig,
   type SeccionDevengo,
 } from "./accrual";
+export {
+  generarSchedule,
+  contarDias,
+  baseDias,
+  diffDiasACT,
+  diffDias30E360,
+  MESES_POR_PERIODO,
+  type ParamsSchedule,
+  type CuponSchedule,
+  type ResultadoSchedule,
+  type ConvencionDias,
+  type FrecuenciaWizard,
+  type TipoGraciaWizard,
+  type EsquemaPreset,
+} from "./schedule";
+export {
+  calcularCAT,
+  calcularTIR,
+  calcularDuracion,
+  type DuracionResult,
+} from "./metrics";
