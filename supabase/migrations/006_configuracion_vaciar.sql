@@ -53,6 +53,9 @@ BEGIN
   -- 2e. Romper FK circular solicitudes ↔ creditos
   UPDATE solicitudes SET credito_id = NULL WHERE credito_id IS NOT NULL;
 
+  -- 2e-bis. Romper auto-referencia de reestructuras
+  UPDATE creditos SET credito_origen_id = NULL WHERE credito_origen_id IS NOT NULL;
+
   -- 2f. creditos
   DELETE FROM creditos;
   GET DIAGNOSTICS v_n = ROW_COUNT;
