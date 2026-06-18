@@ -112,3 +112,27 @@ describe("CAT con comisión + IVA de comisión", () => {
     expect(catCon).toBeGreaterThan(catSin);
   });
 });
+
+describe("CAT/TIR — anticipado vs vencido (CORRECTO)", () => {
+  const rVenc = generarSchedule({ ...BASE, modalidadInteres: "vencido" });
+  const rAntic = generarSchedule({ ...BASE, modalidadInteres: "anticipado" });
+
+  it("Σinterés idéntico", () => {
+    expect(rAntic.totalInteres).toBe(rVenc.totalInteres);
+  });
+
+  it("CAT anticipado > CAT vencido (I1 upfront reduce desembolso neto → mayor costo)", () => {
+    const catV = calcularCAT(rVenc.cupones, BASE.monto, rVenc.comisionAperturaConIva, BASE.fechaDisposicion, rVenc.interesAnticipadoInicial);
+    const catA = calcularCAT(rAntic.cupones, BASE.monto, rAntic.comisionAperturaConIva, BASE.fechaDisposicion, rAntic.interesAnticipadoInicial);
+    console.log(`CAT vencido = ${(catV * 100).toFixed(4)}%, CAT anticipado = ${(catA * 100).toFixed(4)}%`);
+    console.log(`interesAnticipadoInicial = $${rAntic.interesAnticipadoInicial}`);
+    expect(catA).toBeGreaterThan(catV);
+  });
+
+  it("TIR anticipado > TIR vencido", () => {
+    const tirV = calcularTIR(rVenc.cupones, BASE.monto, BASE.fechaDisposicion, rVenc.interesAnticipadoInicial);
+    const tirA = calcularTIR(rAntic.cupones, BASE.monto, BASE.fechaDisposicion, rAntic.interesAnticipadoInicial);
+    console.log(`TIR vencido = ${(tirV * 100).toFixed(4)}%, TIR anticipado = ${(tirA * 100).toFixed(4)}%`);
+    expect(tirA).toBeGreaterThan(tirV);
+  });
+});
