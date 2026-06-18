@@ -6,7 +6,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Briefcase, FileText, CalendarClock,
-  BarChart3, Users, LogOut, Menu, X, UserCheck,
+  BarChart3, Users, LogOut, Menu, X, UserCheck, Settings,
 } from "lucide-react";
 import { useIsMobile } from "@/lib/useIsMobile";
 
@@ -21,6 +21,10 @@ const mainItems = [
 
 const gestionItems = [
   { href: "/dashboard/usuarios", label: "Usuarios", Icon: Users },
+];
+
+const configItems = [
+  { href: "/dashboard/configuracion", label: "Configuración", Icon: Settings },
 ];
 
 const rolLabel: Record<string, string> = {
@@ -85,6 +89,12 @@ export default function Sidebar({ email, rol }: { email: string; rol: string }) 
             </nav>
           </>
         )}
+        <SectionLabel text="Sistema" style={{ marginTop: 20 }} />
+        <nav style={{ display: "grid", gap: 1 }}>
+          {configItems.map((it) => (
+            <NavItem key={it.href} {...it} active={isActive(it.href)} onClick={handleNav} />
+          ))}
+        </nav>
       </div>
 
       {/* Footer */}
