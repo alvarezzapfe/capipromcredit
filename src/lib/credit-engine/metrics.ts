@@ -108,6 +108,7 @@ function solve(
  * @param monto       Monto dispuesto (capital original)
  * @param comisionNeta Comisión de apertura incluyendo IVA si aplica (resta del desembolso)
  * @param fechaDisposicion Fecha de disposición
+ * @param interesAnticipadoInicial Interés del primer periodo cobrado en t0 (anticipado). Default 0.
  * @returns CAT como decimal (0.28 = 28%)
  */
 export function calcularCAT(
@@ -115,8 +116,10 @@ export function calcularCAT(
   monto: number,
   comisionNeta: number,
   fechaDisposicion: string,
+  interesAnticipadoInicial: number = 0,
 ): number {
-  const desembolsoNeto = monto - comisionNeta;
+  // For anticipado, I1 is an upfront cost just like the commission
+  const desembolsoNeto = monto - comisionNeta - interesAnticipadoInicial;
   if (desembolsoNeto <= 0) return 0;
 
   // Flujos: pagos del acreditado (incluyen IVA si aplica)
@@ -143,12 +146,14 @@ export function calcularCAT(
  * Flujo_0 = -monto (desembolso), flujos positivos = pagos recibidos.
  * Resuelve: 0 = -monto + Σ pago_j / (1+TIR)^(d_j/365)
  *
+ * @param interesAnticipadoInicial Interés cobrado en t0 (anticipado). Default 0.
  * @returns TIR como decimal (0.24 = 24%)
  */
 export function calcularTIR(
   cupones: CuponSchedule[],
   monto: number,
   fechaDisposicion: string,
+  interesAnticipadoInicial: number = 0,
 ): number {
   if (monto <= 0) return 0;
 
@@ -161,8 +166,10 @@ export function calcularTIR(
 
   if (flujos.length === 0) return 0;
 
+  // For anticipado, I1 received at t0 reduces the net outflow
+  const netOutflow = monto - interesAnticipadoInicial;
   const semilla = cupones[0]?.tasaAplicada ?? 0.20;
-  return solve(flujos, monto, semilla);
+  return solve(flujos, netOutflow, semilla);
 }
 
 // ── Duración ───────────────────────────────────────────
@@ -208,4 +215,52 @@ export function calcularDuracion(
     macaulay: Math.round(macaulay * 10000) / 10000,
     modificada: Math.round(modificada * 10000) / 10000,
   };
+}
+
+// ── Saldo insoluto a una fecha ─────────────────────────
+
+/**
+ * Saldo insoluto a `fechaCorte`: saldo_final del último cupón con fecha <= fechaCorte.
+ * Si la fecha es anterior al primer cupón, devuelve el monto original.
+ * Si es posterior al último, devuelve el saldo final del último cupón.
+ */
+export function saldoInsolutoCupones(
+  cupones: CuponSchedule[],
+  fechaCorte: string,
+  monto: number,
+): number {
+  let saldo = monto;
+  for (const c of cupones) {
+    if (c.fecha > fechaCorte) break;
+    saldo = c.saldoFinal;
+  }
+  return Math.round(saldo * 100) / 100;
+}
+
+// ── NPV de flujos restantes ────────────────────────────
+
+/**
+ * Valor presente neto de los flujos futuros a partir de `fechaCorte`.
+ *
+ * NPV = Σ pago_j / (1 + tasaDescuento)^(d_j/365)
+ *
+ * donde d_j = días desde fechaCorte hasta la fecha del cupón j,
+ * y solo se suman cupones con fecha > fechaCorte.
+ *
+ * A la tasa del crédito: NPV ≈ saldo insoluto.
+ * A tasa de mercado distinta: refleja premio/descuento.
+ */
+export function calcularNPV(
+  cupones: CuponSchedule[],
+  tasaDescuento: number,
+  fechaCorte: string,
+): number {
+  let sum = 0;
+  for (const c of cupones) {
+    if (c.fecha <= fechaCorte) continue;
+    if (c.pagoTotal <= 0) continue;
+    const d = diffDias(fechaCorte, c.fecha);
+    sum += c.pagoTotal / Math.pow(1 + tasaDescuento, d / 365);
+  }
+  return Math.round(sum * 100) / 100;
 }

@@ -60,6 +60,10 @@ export interface ParamsSchedule {
   comisionApertura: number;   // absolute amount
   comisionIva: boolean;
   ivaIntereses: boolean;
+
+  /** 'vencido' (default): interés al final del periodo.
+   *  'anticipado': interés al inicio — I1 se cobra en t0, I_{k+1} en t_k, último cupón I=0. */
+  modalidadInteres?: "vencido" | "anticipado";
 }
 
 // ── Coupon ─────────────────────────────────────────────
@@ -89,6 +93,8 @@ export interface ResultadoSchedule {
   totalPagar: number;
   comisionAperturaMonto: number;
   comisionAperturaConIva: number;
+  /** Interés del primer periodo cobrado en t0 (solo anticipado). 0 para vencido. */
+  interesAnticipadoInicial: number;
 }
 
 // ── Day count (exported for testing) ───────────────────
@@ -312,6 +318,30 @@ export function generarSchedule(
     }
   }
 
+  // ── Anticipado: shift interest forward ──
+  // I1 cobrado en t0 (upfront), cupón[k] paga I_{k+2}, último cupón I=0.
+  // Interés total NO cambia — solo se adelanta el cobro.
+  let interesAnticipadoInicial = 0;
+  if (params.modalidadInteres === "anticipado" && cupones.length > 1) {
+    const intereses = cupones.map((c) => c.interes);
+    const ivas = cupones.map((c) => c.iva);
+
+    // I1 se cobra en t0 (fuera de la tabla, como costo upfront)
+    interesAnticipadoInicial = intereses[0];
+
+    // cupón[k] paga interés del periodo k+2 (shift by 1 position)
+    for (let i = 0; i < cupones.length; i++) {
+      if (i < cupones.length - 1) {
+        cupones[i].interes = intereses[i + 1];
+        cupones[i].iva = ivas[i + 1];
+      } else {
+        cupones[i].interes = 0;
+        cupones[i].iva = 0;
+      }
+      cupones[i].pagoTotal = rd(cupones[i].capital + cupones[i].interes + cupones[i].iva);
+    }
+  }
+
   // Validate: no coupon with negative interest
   for (const c of cupones) {
     if (c.interes < 0) throw new Error(`Cupón ${c.numero}: interés negativo (${c.interes})`);
@@ -322,7 +352,9 @@ export function generarSchedule(
   const comConIva = params.comisionIva ? rd(comMonto * (1 + IVA)) : comMonto;
 
   const totalCapital = rd(cupones.reduce((s, c) => s + c.capital, 0));
-  const totalInteres = rd(cupones.reduce((s, c) => s + c.interes, 0));
+  // totalInteres includes the upfront I1 for anticipado
+  const interesEnCupones = rd(cupones.reduce((s, c) => s + c.interes, 0));
+  const totalInteres = rd(interesEnCupones + interesAnticipadoInicial);
   const totalIva = rd(cupones.reduce((s, c) => s + c.iva, 0));
   const totalPagos = rd(cupones.reduce((s, c) => s + c.pagoTotal, 0));
 
@@ -332,8 +364,9 @@ export function generarSchedule(
     totalInteres,
     totalIva,
     totalComisiones: comConIva,
-    totalPagar: rd(totalPagos + comConIva),
+    totalPagar: rd(totalPagos + comConIva + interesAnticipadoInicial),
     comisionAperturaMonto: comMonto,
     comisionAperturaConIva: comConIva,
+    interesAnticipadoInicial,
   };
 }

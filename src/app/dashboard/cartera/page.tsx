@@ -17,6 +17,7 @@ import { useIsMobile } from "@/lib/useIsMobile";
 import { ModalAltaCliente } from "@/components/ModalAltaCliente";
 import { WizardActivar } from "@/components/WizardActivar";
 import { rateLabel } from "@/lib/credit-engine/rate-label";
+import { calcularNPV, type CuponSchedule } from "@/lib/credit-engine";
 
 interface Credito {
   id: string;
@@ -64,6 +65,8 @@ interface Credito {
   iva_intereses: boolean;
   cat: number | null;
   tir: number | null;
+  modalidad_interes: string;
+  saldo_override: number | null;
 }
 
 interface Disposicion {
@@ -108,6 +111,7 @@ export default function Cartera() {
   const showTableDelete = puedeEliminarDesdeTabla(rol);
 
   const [saldosRev, setSaldosRev] = useState<Record<string, number>>({});
+  const [saldosInsolutos, setSaldosInsolutos] = useState<Record<string, number>>({});
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -128,6 +132,30 @@ export default function Cartera() {
         saldos[id] = Math.max(0, Math.round(s * 100) / 100);
       }
       setSaldosRev(saldos);
+    }
+
+    // Fetch saldo insoluto for non-revolvente active credits
+    const activeIds = creds.filter(c => c.tipo_producto !== "linea_revolvente" && ["vigente", "en_mora"].includes(c.estatus)).map(c => c.id);
+    if (activeIds.length > 0) {
+      const { data: amortData } = await supabase
+        .from("amortizacion")
+        .select("credito_id, saldo_inicial, pagado, numero_cupon")
+        .in("credito_id", activeIds)
+        .eq("pagado", false)
+        .order("numero_cupon", { ascending: true });
+      const si: Record<string, number> = {};
+      for (const a of amortData ?? []) {
+        if (!si.hasOwnProperty(a.credito_id)) {
+          si[a.credito_id] = Number(a.saldo_inicial);
+        }
+      }
+      // Use saldo_override if present
+      for (const c of creds) {
+        if (c.saldo_override != null && c.saldo_override > 0) {
+          si[c.id] = Number(c.saldo_override);
+        }
+      }
+      setSaldosInsolutos(si);
     }
 
     setCargando(false);
@@ -274,6 +302,7 @@ export default function Cartera() {
                 <th>Producto</th>
                 <th>Acreditado</th>
                 <th style={{ textAlign: "right" }}>Monto</th>
+                <th style={{ textAlign: "right" }}>Saldo</th>
                 <th>Tasa</th>
                 <th>Garantía</th>
                 <th>Gracia</th>
@@ -289,6 +318,7 @@ export default function Cartera() {
                   <td><span className="badge" style={{ background: c.tipo_producto === "factoraje" ? "#ede9fe" : c.tipo_producto === "linea_revolvente" ? "#ecfdf5" : c.tipo_producto?.startsWith("arrendamiento") ? "#e0f2fe" : "#f0f2f5", color: c.tipo_producto === "factoraje" ? "#7c3aed" : c.tipo_producto === "linea_revolvente" ? "#059669" : c.tipo_producto?.startsWith("arrendamiento") ? "#0284c7" : "#64748b", fontSize: 11 }}>{TIPO_PRODUCTO_LABEL[c.tipo_producto] ?? "Crédito"}</span></td>
                   <td>{c.acreditado}</td>
                   <td className="mono" style={{ textAlign: "right" }}>{c.tipo_producto === "linea_revolvente" ? `${mxn(saldosRev[c.id] ?? 0)} / ${mxn(Number(c.limite_linea ?? 0))}` : mxn(Number(c.monto))}</td>
+                  <td className="mono" style={{ textAlign: "right", color: "var(--text-dim)", fontSize: 12.5 }}>{c.tipo_producto === "linea_revolvente" ? "—" : c.estatus === "borrador" ? "—" : saldosInsolutos[c.id] != null ? mxn(saldosInsolutos[c.id]) : mxn(Number(c.monto))}</td>
                   <td style={{ fontSize: 12.5 }}>{tasaLabel(c)}</td>
                   <td><span className="badge" style={{ background: "#f0f2f5", color: "#64748b" }}>{GARANTIA_LABEL[c.tipo_garantia] ?? c.tipo_garantia}</span></td>
                   <td style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{graciaLabel(c)}</td>
@@ -1530,6 +1560,10 @@ function ModalDetalle({ credito, rol, isMobile, onClose, onChanged, onDeleted }:
               </div>
             </div>
           </div>
+          {/* NPV — for active non-revolvente credits with amortization */}
+          {!esRev && amort.length > 0 && ["vigente", "en_mora"].includes(credito.estatus) && (
+            <NpvPanel amort={amort} tasaCredito={Number(credito.tasa_anual) || 0} />
+          )}
           <TrazabilidadPanel bitacora={bitacora} />
         </div>);
         })()}
@@ -1946,6 +1980,50 @@ function ModalConfirmarEliminacion({ credito, onClose, onDeleted }: { credito: C
   );
 }
 
+
+function NpvPanel({ amort, tasaCredito }: { amort: any[]; tasaCredito: number }) {
+  const [tasaDesc, setTasaDesc] = useState(((tasaCredito || 0.24) * 100).toFixed(2));
+  const hoy = new Date().toISOString().slice(0, 10);
+
+  const cupones: CuponSchedule[] = amort.map((a: any) => ({
+    numero: a.numero_cupon,
+    fecha: a.fecha_pago,
+    saldoInicial: Number(a.saldo_inicial),
+    capital: Number(a.capital),
+    interes: Number(a.interes),
+    iva: 0,
+    pagoTotal: Number(a.pago_total),
+    saldoFinal: Number(a.saldo_final),
+    tasaAplicada: Number(a.tasa_aplicada ?? tasaCredito),
+    tiieReferencia: a.valor_referencia != null ? Number(a.valor_referencia) : null,
+    diasPeriodo: 30,
+  }));
+
+  const tasa = (Number(tasaDesc) || 0) / 100;
+  const npvVal = calcularNPV(cupones, tasa, hoy);
+  // Saldo insoluto = first unpaid coupon's saldo_inicial
+  const unpaid = amort.filter((a: any) => !a.pagado).sort((a: any, b: any) => a.numero_cupon - b.numero_cupon);
+  const saldo = unpaid.length > 0 ? Number(unpaid[0].saldo_inicial) : 0;
+  const diff = npvVal - saldo;
+
+  return (
+    <div className="panel" style={{ padding: "16px 20px", marginBottom: 20 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Valor Presente Neto (flujos restantes)</div>
+      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "8px 12px", alignItems: "center", marginBottom: 12 }}>
+        <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>Tasa de descuento (%)</span>
+        <input className="input mono" type="number" step="0.01" value={tasaDesc} onChange={(e) => setTasaDesc(e.target.value)} style={{ width: 100, padding: "5px 8px", fontSize: 13 }} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+        <div><div style={{ fontSize: 10.5, color: "var(--text-faint)", textTransform: "uppercase" }}>NPV</div><div className="mono" style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>{mxn(npvVal)}</div></div>
+        <div><div style={{ fontSize: 10.5, color: "var(--text-faint)", textTransform: "uppercase" }}>Saldo insoluto</div><div className="mono" style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>{mxn(saldo)}</div></div>
+        <div><div style={{ fontSize: 10.5, color: "var(--text-faint)", textTransform: "uppercase" }}>{diff >= 0 ? "Premio" : "Descuento"}</div><div className="mono" style={{ fontSize: 16, fontWeight: 600, marginTop: 2, color: diff >= 0 ? "var(--green)" : "var(--red)" }}>{diff >= 0 ? "+" : ""}{mxn(diff)}</div></div>
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--text-faint)", marginTop: 8 }}>
+        A la tasa del crédito, NPV ≈ saldo insoluto. A tasa de mercado distinta refleja premio/descuento.
+      </div>
+    </div>
+  );
+}
 
 function Dato({ label, valor }: { label: string; valor: string }) {
   return (<div><div style={{ fontSize: 11, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div><div className="mono" style={{ fontSize: 15, fontWeight: 600, marginTop: 2 }}>{valor}</div></div>);

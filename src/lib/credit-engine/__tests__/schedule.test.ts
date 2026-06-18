@@ -356,3 +356,65 @@ describe("generarSchedule — validaciones", () => {
     expect(() => generarSchedule({ ...BASE, esquema: "int_capdif", graciaMeses: 0 })).toThrow();
   });
 });
+
+// ── Modalidad de interés: anticipado vs vencido ──
+
+describe("generarSchedule — modalidad anticipado vs vencido", () => {
+  const vencido = generarSchedule({ ...BASE, comisionApertura: 2000, modalidadInteres: "vencido" });
+  const anticipado = generarSchedule({ ...BASE, comisionApertura: 2000, modalidadInteres: "anticipado" });
+
+  it("mismo número de cupones", () => {
+    expect(anticipado.cupones).toHaveLength(vencido.cupones.length);
+  });
+
+  it("Σcapital idéntico en ambos", () => {
+    expect(anticipado.totalCapital).toBe(vencido.totalCapital);
+    expect(anticipado.totalCapital).toBe(100_000);
+  });
+
+  it("saldo final = 0 en ambos", () => {
+    expect(anticipado.cupones[11].saldoFinal).toBe(0);
+    expect(vencido.cupones[11].saldoFinal).toBe(0);
+  });
+
+  it("interés total IDÉNTICO (anticipado NO cambia el monto, solo el timing)", () => {
+    expect(anticipado.totalInteres).toBe(vencido.totalInteres);
+  });
+
+  it("interesAnticipadoInicial = I1 del vencido (cobrado en t0)", () => {
+    expect(anticipado.interesAnticipadoInicial).toBe(vencido.cupones[0].interes);
+    expect(anticipado.interesAnticipadoInicial).toBeGreaterThan(0);
+  });
+
+  it("vencido interesAnticipadoInicial = 0", () => {
+    expect(vencido.interesAnticipadoInicial).toBe(0);
+  });
+
+  it("anticipado: cupón[0].interes = I2 del vencido (shifted)", () => {
+    expect(anticipado.cupones[0].interes).toBe(vencido.cupones[1].interes);
+  });
+
+  it("anticipado: último cupón interés = 0", () => {
+    expect(anticipado.cupones[11].interes).toBe(0);
+  });
+
+  it("capital idéntico por cupón", () => {
+    for (let i = 0; i < 12; i++) {
+      expect(anticipado.cupones[i].capital).toBe(vencido.cupones[i].capital);
+    }
+  });
+
+  it("console: print comparison for review", () => {
+    console.log("\n=== VENCIDO vs ANTICIPADO (CORRECTO) — $100k / 24% / 12m / ACT/360 / com $2k ===");
+    console.log(`Interés anticipado en t0 (upfront): $${anticipado.interesAnticipadoInicial}`);
+    console.log("Cup | Venc.Interés | Antic.Interés | Venc.Pago   | Antic.Pago");
+    for (let i = 0; i < 12; i++) {
+      const v = vencido.cupones[i];
+      const a = anticipado.cupones[i];
+      console.log(
+        `${String(i + 1).padStart(3)} | ${String(v.interes).padStart(11)} | ${String(a.interes).padStart(13)} | ${String(v.pagoTotal).padStart(11)} | ${String(a.pagoTotal).padStart(10)}`
+      );
+    }
+    console.log(`Tot | ${String(vencido.totalInteres).padStart(11)} | ${String(anticipado.totalInteres).padStart(13)} | ${String(vencido.totalPagar).padStart(11)} | ${String(anticipado.totalPagar).padStart(10)}`);
+  });
+});
