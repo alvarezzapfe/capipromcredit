@@ -146,7 +146,7 @@ function TabDatos({ canWipe, readOnly, isMobile }: { canWipe: boolean; readOnly:
       URL.revokeObjectURL(url);
       setBackupOk(true);
     } catch (e: any) {
-      alert("Error: " + e.message);
+      setBackupMsg("Error: " + e.message);
     }
     setDescargando(false);
   }

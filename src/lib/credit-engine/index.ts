@@ -27,5 +27,7 @@ export {
   calcularCAT,
   calcularTIR,
   calcularDuracion,
+  calcularNPV,
+  saldoInsolutoCupones,
   type DuracionResult,
 } from "./metrics";

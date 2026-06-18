@@ -7,6 +7,7 @@ import { Inbox, Plus, ArrowRightCircle, Undo2 } from "lucide-react";
 import { useRol } from "@/lib/useRol";
 import { esSoloLectura } from "@/lib/rbac";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import Link from "next/link";
 
 interface Solicitud {
@@ -43,6 +44,7 @@ export default function Solicitudes() {
   const [form, setForm] = useState(formVacio);
   const [guardando, setGuardando] = useState(false);
   const [errModal, setErrModal] = useState<string | null>(null);
+  const [pendingConfirm, setPendingConfirm] = useState<{ tipo: "convertir_post_aprobar" | "convertir" | "anular"; id: string } | null>(null);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -91,9 +93,7 @@ export default function Solicitudes() {
       await cargar();
 
       // Ofrecer convertir inmediatamente
-      if (confirm("Solicitud aprobada. ¿Convertir a crédito borrador en cartera? (Los términos se podrán editar antes de activar)")) {
-        await convertir(id);
-      }
+      setPendingConfirm({ tipo: "convertir_post_aprobar", id });
       return;
     }
 
@@ -135,7 +135,10 @@ export default function Solicitudes() {
   }
 
   async function anularConversion(solicitudId: string) {
-    if (!confirm("¿Anular la conversión? El crédito borrador se cancelará y la solicitud volverá a 'Aprobada'.")) return;
+    setPendingConfirm({ tipo: "anular", id: solicitudId });
+  }
+
+  async function ejecutarAnulacion(solicitudId: string) {
     setErrCambio(null);
     setMsgExito(null);
     const supabase = createClient();
@@ -358,11 +361,7 @@ export default function Solicitudes() {
                             </select>
                             <button
                               className="btn btn-primary"
-                              onClick={() => {
-                                if (confirm("Esto creará el crédito en cartera con términos default por revisar. ¿Continuar?")) {
-                                  convertir(s.id);
-                                }
-                              }}
+                              onClick={() => setPendingConfirm({ tipo: "convertir", id: s.id })}
                               disabled={convirtiendo === s.id}
                               style={{ padding: "5px 12px", fontSize: 12, whiteSpace: "nowrap" }}
                             >
@@ -468,6 +467,38 @@ export default function Solicitudes() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Confirm modals */}
+      {pendingConfirm?.tipo === "convertir_post_aprobar" && (
+        <ConfirmModal
+          variante="aprobacion"
+          titulo="Solicitud aprobada"
+          mensaje="¿Convertir a crédito borrador en cartera? Los términos se podrán editar antes de activar."
+          textoConfirmar="Convertir"
+          onConfirm={() => { const id = pendingConfirm.id; setPendingConfirm(null); convertir(id); }}
+          onCancel={() => setPendingConfirm(null)}
+        />
+      )}
+      {pendingConfirm?.tipo === "convertir" && (
+        <ConfirmModal
+          variante="aprobacion"
+          titulo="Convertir a crédito"
+          mensaje="Esto creará el crédito en cartera con términos default por revisar. ¿Continuar?"
+          textoConfirmar="Convertir"
+          onConfirm={() => { const id = pendingConfirm.id; setPendingConfirm(null); convertir(id); }}
+          onCancel={() => setPendingConfirm(null)}
+        />
+      )}
+      {pendingConfirm?.tipo === "anular" && (
+        <ConfirmModal
+          variante="peligro"
+          titulo="Anular conversión"
+          mensaje="El crédito borrador se cancelará y la solicitud volverá a 'Aprobada'."
+          textoConfirmar="Anular"
+          onConfirm={() => { const id = pendingConfirm.id; setPendingConfirm(null); ejecutarAnulacion(id); }}
+          onCancel={() => setPendingConfirm(null)}
+        />
       )}
     </div>
   );
