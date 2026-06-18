@@ -14,6 +14,8 @@ import {
   calcularCAT,
   calcularTIR,
   calcularDuracion,
+  calcularNPV,
+  saldoInsolutoCupones,
   type ParamsSchedule,
   type ResultadoSchedule,
   type RateCatalogRow,
@@ -23,6 +25,7 @@ import {
   type ConvencionDias,
 } from "@/lib/credit-engine";
 import { rateLabel, fmtPct } from "@/lib/credit-engine/rate-label";
+import { ConfirmModal } from "@/components/ConfirmModal";
 
 // ── Props ─────────────────────────────────────────────
 
@@ -82,6 +85,8 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
   const [ivaIntereses, setIvaIntereses] = useState<boolean>(c.iva_intereses ?? false);
   const [modalidadInteres, setModalidadInteres] = useState<"vencido" | "anticipado">(c.modalidad_interes ?? "vencido");
 
+  const [saldoOverride, setSaldoOverride] = useState(c.saldo_override?.toString() ?? "");
+
   const [catalog, setCatalog] = useState<RateCatalogRow[]>([]);
   const [activando, setActivando] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,7 +143,7 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
 
   // ── Schedule + metrics (debounced) ──
   const [schedule, setSchedule] = useState<ResultadoSchedule | null>(null);
-  const [metrics, setMetrics] = useState<{ cat: number; catSinCom: number; tir: number; durMac: number; durMod: number } | null>(null);
+  const [metrics, setMetrics] = useState<{ cat: number; catSinCom: number; tir: number; durMac: number; durMod: number; saldoInsoluto: number } | null>(null);
   const [schedError, setSchedError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -158,7 +163,10 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
         const catSinCom = calcularCAT(r.cupones, monto, 0, params.fechaDisposicion, r.interesAnticipadoInicial);
         const tir = calcularTIR(r.cupones, monto, params.fechaDisposicion, r.interesAnticipadoInicial);
         const dur = calcularDuracion(r.cupones, tir, params.fechaDisposicion);
-        setMetrics({ cat, catSinCom, tir, durMac: dur.macaulay, durMod: dur.modificada });
+        const hoy = new Date().toISOString().slice(0, 10);
+        const saldoCalc = saldoInsolutoCupones(r.cupones, hoy, monto);
+        const saldoFinal = saldoOverride && Number(saldoOverride) > 0 ? Number(saldoOverride) : saldoCalc;
+        setMetrics({ cat, catSinCom, tir, durMac: dur.macaulay, durMod: dur.modificada, saldoInsoluto: saldoFinal });
       } catch (e: any) {
         setSchedule(null);
         setMetrics(null);
@@ -166,7 +174,7 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
       }
     }, 200);
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [params, catalog, monto]);
+  }, [params, catalog, monto, saldoOverride]);
 
   // ── Validations ──
   const validaciones = useMemo(() => {
@@ -189,10 +197,11 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
 
   const puedeActivar = validaciones.length === 0 && schedule != null && metrics != null;
 
+  const [showConfirmActivar, setShowConfirmActivar] = useState(false);
+
   // ── Activate ──
   async function activar() {
     if (!puedeActivar || !schedule || !metrics || !params) return;
-    if (!confirm("¿Activar este crédito? Se generará la tabla de amortización y pasará a Vigente.")) return;
 
     setActivando(true);
     setError(null);
@@ -229,6 +238,7 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
         modalidad_interes: modalidadInteres,
         cat: Math.round(metrics.cat * 10000) / 10000,
         tir: Math.round(metrics.tir * 10000) / 10000,
+        saldo_override: saldoOverride && Number(saldoOverride) > 0 ? Number(saldoOverride) : null,
         periodo_gracia_meses: graciaNum,
         tipo_gracia: tipoGracia === "solo_interes" ? "capital" : tipoGracia === "capitaliza_interes" ? "total" : "ninguna",
       }).eq("id", c.id);
@@ -343,8 +353,17 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
           {/* Fechas */}
           {sec("Fechas")}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-            <div className="field"><label>Disposición</label><input className="input mono" type="date" value={fechaDisp} onChange={(e) => { setFechaDisp(e.target.value); if (!c.fecha_primer_pago) setFechaPrimer(addMeses(e.target.value, 1)); }} /></div>
+            <div className="field"><label>Disposición (origen)</label><input className="input mono" type="date" value={fechaDisp} onChange={(e) => { setFechaDisp(e.target.value); if (!c.fecha_primer_pago) setFechaPrimer(addMeses(e.target.value, 1)); }} /></div>
             <div className="field"><label>Primer pago</label><input className="input mono" type="date" value={fechaPrimer} onChange={(e) => setFechaPrimer(e.target.value)} /></div>
+          </div>
+          {metrics && metrics.saldoInsoluto < monto && metrics.saldoInsoluto > 0 && (
+            <div style={{ fontSize: 12, color: "var(--amber)", background: "var(--amber-soft)", padding: "6px 10px", borderRadius: 6, marginTop: 8 }}>
+              Crédito en curso: saldo insoluto calculado a hoy = <strong className="mono">{mxn(metrics.saldoInsoluto)}</strong>
+            </div>
+          )}
+          <div className="field" style={{ marginTop: 8 }}>
+            <label>Saldo insoluto actual (override, opcional)</label>
+            <input className="input mono" type="number" value={saldoOverride} onChange={(e) => setSaldoOverride(e.target.value)} placeholder="Dejar vacío para usar el calculado" />
           </div>
 
           {/* Comisión */}
@@ -408,6 +427,7 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
               <MetricBox label="Interés total" value={mxn(schedule?.totalInteres ?? 0)} />
               <MetricBox label="IVA total" value={mxn(schedule?.totalIva ?? 0)} />
               <MetricBox label="Comisiones" value={mxn(schedule?.totalComisiones ?? 0)} />
+              <MetricBox label="Saldo insoluto (hoy)" value={mxn(metrics.saldoInsoluto)} />
               <div className="panel" style={{ padding: "12px 14px", gridColumn: "1 / -1", background: "#f0f2f5" }}>
                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-faint)" }}>Total a pagar</div>
                 <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: "#0a1628", marginTop: 2 }}>{mxn(schedule?.totalPagar ?? 0)}</div>
@@ -487,10 +507,21 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
         <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "10px 14px", borderRadius: 6, fontSize: 13, marginBottom: 14 }}>{error}</div>
       )}
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
-        <button className="btn btn-primary" onClick={activar} disabled={!puedeActivar || activando} style={{ padding: "10px 24px", fontSize: 14, opacity: puedeActivar ? 1 : 0.5 }}>
+        <button className="btn btn-primary" onClick={() => setShowConfirmActivar(true)} disabled={!puedeActivar || activando} style={{ padding: "10px 24px", fontSize: 14, opacity: puedeActivar ? 1 : 0.5 }}>
           {activando ? "Activando…" : "Activar crédito"}
         </button>
       </div>
+
+      {showConfirmActivar && (
+        <ConfirmModal
+          variante="aprobacion"
+          titulo="Activar crédito"
+          mensaje="Se generará la tabla de amortización y el crédito pasará a Vigente. Esta acción no se puede deshacer."
+          textoConfirmar="Activar"
+          onConfirm={() => { setShowConfirmActivar(false); activar(); }}
+          onCancel={() => setShowConfirmActivar(false)}
+        />
+      )}
     </div>
   );
 }

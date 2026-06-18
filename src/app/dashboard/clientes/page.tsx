@@ -8,6 +8,7 @@ import { UserCheck, Plus, Upload, Trash2, Download, Search, FileBarChart2, Scrol
 import { useRol } from "@/lib/useRol";
 import { esSoloLectura } from "@/lib/rbac";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { ConfirmModal } from "@/components/ConfirmModal";
 
 interface Cliente {
   id: string;
@@ -193,6 +194,8 @@ function ModalDetalleCliente({ cliente: clienteInicial, isMobile, readOnly, onCl
   // Upload state
   const [subiendo, setSubiendo] = useState<string | null>(null); // key of section being uploaded to
   const [errDoc, setErrDoc] = useState<string | null>(null);
+  const [errDescarga, setErrDescarga] = useState<string | null>(null);
+  const [docPendienteElim, setDocPendienteElim] = useState<DocCliente | null>(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -264,15 +267,20 @@ function ModalDetalleCliente({ cliente: clienteInicial, isMobile, readOnly, onCl
   async function descargarDoc(doc: DocCliente) {
     const supabase = createClient();
     const { data, error } = await supabase.storage.from("expedientes").createSignedUrl(doc.storage_path, 60);
-    if (error || !data?.signedUrl) { alert("Error al generar link"); return; }
+    if (error || !data?.signedUrl) { setErrDescarga("Error al generar link de descarga"); setTimeout(() => setErrDescarga(null), 5000); return; }
     window.open(data.signedUrl, "_blank");
   }
 
   async function eliminarDoc(doc: DocCliente) {
-    if (!confirm("Eliminar " + doc.nombre_archivo + "?")) return;
+    setDocPendienteElim(doc);
+  }
+
+  async function ejecutarElimDoc() {
+    if (!docPendienteElim) return;
     const supabase = createClient();
-    await supabase.storage.from("expedientes").remove([doc.storage_path]);
-    await supabase.from("documentos_cliente").delete().eq("id", doc.id);
+    await supabase.storage.from("expedientes").remove([docPendienteElim.storage_path]);
+    await supabase.from("documentos_cliente").delete().eq("id", docPendienteElim.id);
+    setDocPendienteElim(null);
     cargar();
     onChanged();
   }
@@ -392,6 +400,17 @@ function ModalDetalleCliente({ cliente: clienteInicial, isMobile, readOnly, onCl
             )}
           </div>
         {mostrarEditar && <ModalAltaCliente isMobile={isMobile} cliente={cliente} onClose={() => setMostrarEditar(false)} onSaved={() => { setMostrarEditar(false); cargar(); onChanged(); }} />}
+        {errDescarga && <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: "var(--red-soft)", color: "var(--red)", padding: "10px 18px", borderRadius: 8, fontSize: 13, zIndex: 300 }}>{errDescarga}</div>}
+        {docPendienteElim && (
+          <ConfirmModal
+            variante="peligro"
+            titulo="Eliminar documento"
+            mensaje={`¿Eliminar "${docPendienteElim.nombre_archivo}"? Esta acción no se puede deshacer.`}
+            textoConfirmar="Eliminar"
+            onConfirm={ejecutarElimDoc}
+            onCancel={() => setDocPendienteElim(null)}
+          />
+        )}
         </div>
       </div>
     </div>

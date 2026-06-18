@@ -216,3 +216,51 @@ export function calcularDuracion(
     modificada: Math.round(modificada * 10000) / 10000,
   };
 }
+
+// ── Saldo insoluto a una fecha ─────────────────────────
+
+/**
+ * Saldo insoluto a `fechaCorte`: saldo_final del último cupón con fecha <= fechaCorte.
+ * Si la fecha es anterior al primer cupón, devuelve el monto original.
+ * Si es posterior al último, devuelve el saldo final del último cupón.
+ */
+export function saldoInsolutoCupones(
+  cupones: CuponSchedule[],
+  fechaCorte: string,
+  monto: number,
+): number {
+  let saldo = monto;
+  for (const c of cupones) {
+    if (c.fecha > fechaCorte) break;
+    saldo = c.saldoFinal;
+  }
+  return Math.round(saldo * 100) / 100;
+}
+
+// ── NPV de flujos restantes ────────────────────────────
+
+/**
+ * Valor presente neto de los flujos futuros a partir de `fechaCorte`.
+ *
+ * NPV = Σ pago_j / (1 + tasaDescuento)^(d_j/365)
+ *
+ * donde d_j = días desde fechaCorte hasta la fecha del cupón j,
+ * y solo se suman cupones con fecha > fechaCorte.
+ *
+ * A la tasa del crédito: NPV ≈ saldo insoluto.
+ * A tasa de mercado distinta: refleja premio/descuento.
+ */
+export function calcularNPV(
+  cupones: CuponSchedule[],
+  tasaDescuento: number,
+  fechaCorte: string,
+): number {
+  let sum = 0;
+  for (const c of cupones) {
+    if (c.fecha <= fechaCorte) continue;
+    if (c.pagoTotal <= 0) continue;
+    const d = diffDias(fechaCorte, c.fecha);
+    sum += c.pagoTotal / Math.pow(1 + tasaDescuento, d / 365);
+  }
+  return Math.round(sum * 100) / 100;
+}

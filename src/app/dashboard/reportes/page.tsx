@@ -40,6 +40,7 @@ export default function Reportes() {
   const [amort, setAmort] = useState<AmortRow[]>([]);
   const [cargando, setCargando] = useState(true);
   const [descargando, setDescargando] = useState<"pdf" | "xlsx" | null>(null);
+  const [errPdf, setErrPdf] = useState<string | null>(null);
 
   // Filtros
   const [desde, setDesde] = useState(format(startOfYear(new Date()), "yyyy-MM-dd"));
@@ -199,7 +200,7 @@ export default function Reportes() {
         u.user?.email ?? "sistema"
       );
       triggerDownload(blob, `CapiProm-Reporte-${format(new Date(), "yyyyMMdd-HHmm")}.pdf`);
-    } catch (e) { console.error(e); alert("No se pudo generar el PDF."); }
+    } catch (e) { console.error(e); setErrPdf("No se pudo generar el PDF."); setTimeout(() => setErrPdf(null), 6000); }
     setDescargando(null);
   }
 
@@ -214,6 +215,7 @@ export default function Reportes() {
 
   return (
     <div style={{ padding: isMobile ? "20px 16px 40px" : "32px 48px 60px" }}>
+      {errPdf && <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "11px 16px", borderRadius: 6, fontSize: 13.5, marginBottom: 18 }}>{errPdf}</div>}
       {/* Header */}
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
         <div>
