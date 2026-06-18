@@ -25,6 +25,7 @@ import {
   type ConvencionDias,
 } from "@/lib/credit-engine";
 import { rateLabel, fmtPct } from "@/lib/credit-engine/rate-label";
+import { ConfirmModal } from "@/components/ConfirmModal";
 
 // ── Props ─────────────────────────────────────────────
 
@@ -194,10 +195,11 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
 
   const puedeActivar = validaciones.length === 0 && schedule != null && metrics != null;
 
+  const [showConfirmActivar, setShowConfirmActivar] = useState(false);
+
   // ── Activate ──
   async function activar() {
     if (!puedeActivar || !schedule || !metrics || !params) return;
-    if (!confirm("¿Activar este crédito? Se generará la tabla de amortización y pasará a Vigente.")) return;
 
     setActivando(true);
     setError(null);
@@ -487,10 +489,21 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
         <div style={{ background: "var(--red-soft)", color: "var(--red)", padding: "10px 14px", borderRadius: 6, fontSize: 13, marginBottom: 14 }}>{error}</div>
       )}
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
-        <button className="btn btn-primary" onClick={activar} disabled={!puedeActivar || activando} style={{ padding: "10px 24px", fontSize: 14, opacity: puedeActivar ? 1 : 0.5 }}>
+        <button className="btn btn-primary" onClick={() => setShowConfirmActivar(true)} disabled={!puedeActivar || activando} style={{ padding: "10px 24px", fontSize: 14, opacity: puedeActivar ? 1 : 0.5 }}>
           {activando ? "Activando…" : "Activar crédito"}
         </button>
       </div>
+
+      {showConfirmActivar && (
+        <ConfirmModal
+          variante="aprobacion"
+          titulo="Activar crédito"
+          mensaje="Se generará la tabla de amortización y el crédito pasará a Vigente. Esta acción no se puede deshacer."
+          textoConfirmar="Activar"
+          onConfirm={() => { setShowConfirmActivar(false); activar(); }}
+          onCancel={() => setShowConfirmActivar(false)}
+        />
+      )}
     </div>
   );
 }
