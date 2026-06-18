@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase-client";
 import { mxn } from "@/lib/format";
-import { Settings, Download, Trash2, Plus, Pencil, ShieldAlert } from "lucide-react";
+import { Settings, Download, Trash2, Plus, Pencil, ShieldAlert, Cloud, RefreshCw } from "lucide-react";
 import { useRol } from "@/lib/useRol";
 import { esSoloLectura } from "@/lib/rbac";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -73,16 +73,66 @@ export default function Configuracion() {
 // TAB: DATOS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+interface BackupItem {
+  name: string;
+  size: number;
+  created_at: string;
+  signedUrl: string | null;
+}
+
 function TabDatos({ canWipe, readOnly, isMobile }: { canWipe: boolean; readOnly: boolean; isMobile?: boolean }) {
   const [incluyeTasas, setIncluyeTasas] = useState(false);
   const [backupAntes, setBackupAntes] = useState(true);
-  const [backupDescargado, setBackupDescargado] = useState(false);
+  const [backupOk, setBackupOk] = useState(false);
+  const [subiendo, setSubiendo] = useState(false);
   const [descargando, setDescargando] = useState(false);
   const [mostrarModal, setMostrarModal] = useState(false);
+  const [backupMsg, setBackupMsg] = useState<string | null>(null);
+
+  // Saved backups list
+  const [respaldos, setRespaldos] = useState<BackupItem[]>([]);
+  const [cargandoResp, setCargandoResp] = useState(false);
 
   const scope = incluyeTasas ? "con_tasas" : "operativo";
 
-  async function descargarBackup() {
+  const cargarRespaldos = useCallback(async () => {
+    if (readOnly) return;
+    setCargandoResp(true);
+    try {
+      const res = await fetch("/api/configuracion/respaldos");
+      if (res.ok) {
+        const data = await res.json();
+        setRespaldos(data.items ?? []);
+      }
+    } catch { /* ignore */ }
+    setCargandoResp(false);
+  }, [readOnly]);
+
+  useEffect(() => { cargarRespaldos(); }, [cargarRespaldos]);
+
+  /** Upload backup to cloud bucket */
+  async function subirRespaldo() {
+    setSubiendo(true);
+    setBackupMsg(null);
+    try {
+      const res = await fetch("/api/configuracion/backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Error desconocido");
+      setBackupOk(true);
+      setBackupMsg(`Respaldo guardado: ${data.filename}`);
+      cargarRespaldos();
+    } catch (e: any) {
+      setBackupMsg("Error: " + e.message);
+    }
+    setSubiendo(false);
+  }
+
+  /** Direct download (legacy) */
+  async function descargarDirecto() {
     setDescargando(true);
     try {
       const res = await fetch(`/api/configuracion/backup?scope=${scope}`);
@@ -94,32 +144,84 @@ function TabDatos({ canWipe, readOnly, isMobile }: { canWipe: boolean; readOnly:
       a.download = res.headers.get("content-disposition")?.split("filename=")[1]?.replace(/"/g, "") ?? "capiprom_backup.json";
       a.click();
       URL.revokeObjectURL(url);
-      setBackupDescargado(true);
+      setBackupOk(true);
     } catch (e: any) {
-      alert("Error descargando backup: " + e.message);
+      alert("Error: " + e.message);
     }
     setDescargando(false);
   }
 
-  const puedeVaciar = canWipe && (!backupAntes || backupDescargado);
+  function fmtSize(bytes: number): string {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  const puedeVaciar = canWipe && (!backupAntes || backupOk);
 
   return (
     <div>
-      {/* Export */}
+      {/* Backup */}
       <div className="panel" style={{ padding: "20px 24px", marginBottom: 20 }}>
-        <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Respaldo de datos</h3>
+        <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>
+          <Cloud size={16} strokeWidth={1.75} style={{ marginRight: 6, verticalAlign: "middle", color: "var(--amber)" }} />
+          Respaldo de datos
+        </h3>
         <p style={{ fontSize: 13, color: "var(--text-dim)", marginBottom: 16 }}>
-          Descarga un archivo JSON con todos los datos operativos (créditos, solicitudes, clientes, expedientes).
+          Genera un respaldo JSON y lo guarda en la nube. También puedes descargar directamente.
         </p>
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, marginBottom: 12, cursor: "pointer" }}>
           <input type="checkbox" checked={incluyeTasas} onChange={(e) => setIncluyeTasas(e.target.checked)} />
           Incluir también tasas y catálogos
         </label>
-        <button className="btn btn-primary" onClick={descargarBackup} disabled={descargando || readOnly} style={{ padding: "9px 18px", fontSize: 13 }}>
-          <Download size={14} strokeWidth={1.75} /> {descargando ? "Descargando…" : "Descargar respaldo"}
-        </button>
-        {backupDescargado && <span style={{ fontSize: 12, color: "var(--green)", marginLeft: 12 }}>Respaldo descargado</span>}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn btn-primary" onClick={subirRespaldo} disabled={subiendo || readOnly} style={{ padding: "9px 18px", fontSize: 13 }}>
+            <Cloud size={14} strokeWidth={1.75} /> {subiendo ? "Guardando…" : "Guardar respaldo en nube"}
+          </button>
+          <button className="btn btn-ghost" onClick={descargarDirecto} disabled={descargando || readOnly} style={{ padding: "9px 18px", fontSize: 13 }}>
+            <Download size={14} strokeWidth={1.75} /> {descargando ? "Descargando…" : "Descarga directa"}
+          </button>
+        </div>
+        {backupMsg && (
+          <div style={{ marginTop: 10, fontSize: 12.5, color: backupOk ? "var(--green)" : "var(--red)" }}>{backupMsg}</div>
+        )}
       </div>
+
+      {/* Saved backups */}
+      {!readOnly && (
+        <div className="panel" style={{ padding: "20px 24px", marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 600 }}>Respaldos guardados</h3>
+            <button onClick={cargarRespaldos} disabled={cargandoResp} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-dim)", padding: 4 }} title="Recargar">
+              <RefreshCw size={14} strokeWidth={1.75} style={{ animation: cargandoResp ? "spin 1s linear infinite" : "none" }} />
+            </button>
+          </div>
+          {cargandoResp ? (
+            <div style={{ fontSize: 13, color: "var(--text-faint)", padding: "12px 0" }}>Cargando…</div>
+          ) : respaldos.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--text-faint)", padding: "12px 0" }}>Sin respaldos guardados</div>
+          ) : (
+            <div style={{ display: "grid", gap: 6 }}>
+              {respaldos.map((r) => (
+                <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--line-soft)" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="mono" style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
+                    <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+                      {r.created_at ? new Date(r.created_at).toLocaleString("es-MX") : "—"}
+                      {r.size > 0 && <span> · {fmtSize(r.size)}</span>}
+                    </div>
+                  </div>
+                  {r.signedUrl && (
+                    <a href={r.signedUrl} download={r.name} style={{ color: "var(--amber)", fontSize: 12.5, fontWeight: 600, textDecoration: "none", display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                      <Download size={13} /> Descargar
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Wipe */}
       <div className="panel" style={{ padding: "20px 24px", border: "1px solid var(--red)", borderColor: canWipe ? "#fca5a5" : "var(--line)" }}>
@@ -132,17 +234,17 @@ function TabDatos({ canWipe, readOnly, isMobile }: { canWipe: boolean; readOnly:
         </p>
 
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, marginBottom: 8, cursor: "pointer" }}>
-          <input type="checkbox" checked={incluyeTasas} onChange={(e) => { setIncluyeTasas(e.target.checked); setBackupDescargado(false); }} />
+          <input type="checkbox" checked={incluyeTasas} onChange={(e) => { setIncluyeTasas(e.target.checked); setBackupOk(false); setBackupMsg(null); }} />
           Incluir también tasas y catálogos
         </label>
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, marginBottom: 16, cursor: "pointer" }}>
-          <input type="checkbox" checked={backupAntes} onChange={(e) => { setBackupAntes(e.target.checked); if (!e.target.checked) setBackupDescargado(false); }} />
+          <input type="checkbox" checked={backupAntes} onChange={(e) => { setBackupAntes(e.target.checked); if (!e.target.checked) { setBackupOk(false); setBackupMsg(null); } }} />
           Respaldar antes de vaciar (recomendado)
         </label>
 
-        {backupAntes && !backupDescargado && (
+        {backupAntes && !backupOk && (
           <div style={{ fontSize: 12.5, color: "var(--amber)", background: "var(--amber-soft)", padding: "8px 12px", borderRadius: 6, marginBottom: 12 }}>
-            Descarga el respaldo primero para habilitar el vaciado.
+            Guarda un respaldo en la nube primero para habilitar el vaciado.
           </div>
         )}
 
@@ -168,7 +270,7 @@ function TabDatos({ canWipe, readOnly, isMobile }: { canWipe: boolean; readOnly:
       </div>
 
       {mostrarModal && (
-        <ModalVaciar scope={scope} onClose={() => setMostrarModal(false)} onDone={() => { setMostrarModal(false); setBackupDescargado(false); }} />
+        <ModalVaciar scope={scope} onClose={() => setMostrarModal(false)} onDone={() => { setMostrarModal(false); setBackupOk(false); setBackupMsg(null); }} />
       )}
     </div>
   );
