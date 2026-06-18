@@ -77,11 +77,11 @@ export const FRECUENCIA_WIZARD_LABEL: Record<string, string> = {
 };
 
 export const ESQUEMA_LABEL: Record<string, string> = {
-  frances: "Francesa",
-  lineal: "Lineal (Decreciente)",
-  bullet: "Bullet",
-  creciente: "Creciente",
-  int_capdif: "Int. periódico + K diferido",
+  frances: "Francesa (cuota fija)",
+  lineal: "Lineal (capital fijo, cuota decreciente)",
+  bullet: "Bullet (capital al final)",
+  creciente: "Creciente (cuota creciente)",
+  int_capdif: "Int. periódico + capital diferido",
 };
 
 export const CONVENCION_LABEL: Record<string, string> = {
