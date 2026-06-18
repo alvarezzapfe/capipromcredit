@@ -60,6 +60,10 @@ export interface ParamsSchedule {
   comisionApertura: number;   // absolute amount
   comisionIva: boolean;
   ivaIntereses: boolean;
+
+  /** 'vencido' (default): interés al final del periodo.
+   *  'anticipado': interés al inicio (se cobra en el cupón anterior). */
+  modalidadInteres?: "vencido" | "anticipado";
 }
 
 // ── Coupon ─────────────────────────────────────────────
@@ -309,6 +313,27 @@ export function generarSchedule(
       last.capital = rd(last.capital + delta);
       last.saldoFinal = rd(vr);
       last.pagoTotal = rd(last.capital + last.interes + last.iva);
+    }
+  }
+
+  // ── Anticipado: shift interest forward (each coupon pays NEXT period's interest) ──
+  if (params.modalidadInteres === "anticipado" && cupones.length > 1) {
+    // Save all computed interest values
+    const intereses = cupones.map((c) => c.interes);
+    const ivas = cupones.map((c) => c.iva);
+
+    // Coupon 1 keeps its own interest (paid at disposition = first payment)
+    // Coupon k gets interest of coupon k+1 (paying next period's interest in advance)
+    // Last coupon gets 0 interest (already paid in previous coupon)
+    for (let i = 0; i < cupones.length; i++) {
+      if (i < cupones.length - 1) {
+        cupones[i].interes = intereses[i + 1];
+        cupones[i].iva = ivas[i + 1];
+      } else {
+        cupones[i].interes = 0;
+        cupones[i].iva = 0;
+      }
+      cupones[i].pagoTotal = rd(cupones[i].capital + cupones[i].interes + cupones[i].iva);
     }
   }
 

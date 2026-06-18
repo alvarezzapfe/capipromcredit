@@ -356,3 +356,63 @@ describe("generarSchedule — validaciones", () => {
     expect(() => generarSchedule({ ...BASE, esquema: "int_capdif", graciaMeses: 0 })).toThrow();
   });
 });
+
+// ── Modalidad de interés: anticipado vs vencido ──
+
+describe("generarSchedule — modalidad anticipado vs vencido", () => {
+  const vencido = generarSchedule({ ...BASE, modalidadInteres: "vencido" });
+  const anticipado = generarSchedule({ ...BASE, modalidadInteres: "anticipado" });
+
+  it("mismo número de cupones", () => {
+    expect(anticipado.cupones).toHaveLength(vencido.cupones.length);
+  });
+
+  it("Σcapital idéntico en ambos", () => {
+    expect(anticipado.totalCapital).toBe(vencido.totalCapital);
+    expect(anticipado.totalCapital).toBe(100_000);
+  });
+
+  it("saldo final = 0 en ambos", () => {
+    expect(anticipado.cupones[11].saldoFinal).toBe(0);
+    expect(vencido.cupones[11].saldoFinal).toBe(0);
+  });
+
+  it("anticipado: último cupón interés = 0 (ya pagado en el anterior)", () => {
+    expect(anticipado.cupones[11].interes).toBe(0);
+  });
+
+  it("anticipado: primer cupón tiene interés del segundo periodo (shift)", () => {
+    // Anticipado coupon 1 gets vencido coupon 2's interest
+    expect(anticipado.cupones[0].interes).toBe(vencido.cupones[1].interes);
+  });
+
+  it("vencido: primer cupón tiene su propio interés", () => {
+    // 100000 × 0.24 × 31/360 ≈ 2066.67
+    expect(vencido.cupones[0].interes).toBeCloseTo(2066.67, 0);
+  });
+
+  it("interés total anticipado < vencido (paga antes, sobre saldos menores)", () => {
+    // In anticipado the interest amounts are the same numbers just shifted,
+    // but the LAST period's interest (on smallest balance) is replaced by 0
+    expect(anticipado.totalInteres).toBeLessThan(vencido.totalInteres);
+  });
+
+  it("capital idéntico por cupón (la amortización no cambia)", () => {
+    for (let i = 0; i < 12; i++) {
+      expect(anticipado.cupones[i].capital).toBe(vencido.cupones[i].capital);
+    }
+  });
+
+  it("console: print comparison for review", () => {
+    console.log("\n=== VENCIDO vs ANTICIPADO — $100k / 24% / 12m / ACT/360 ===");
+    console.log("Cup | Venc.Interés | Antic.Interés | Venc.Pago   | Antic.Pago");
+    for (let i = 0; i < 12; i++) {
+      const v = vencido.cupones[i];
+      const a = anticipado.cupones[i];
+      console.log(
+        `${String(i + 1).padStart(3)} | ${String(v.interes).padStart(11)} | ${String(a.interes).padStart(13)} | ${String(v.pagoTotal).padStart(11)} | ${String(a.pagoTotal).padStart(10)}`
+      );
+    }
+    console.log(`Tot | ${String(vencido.totalInteres).padStart(11)} | ${String(anticipado.totalInteres).padStart(13)} | ${String(vencido.totalPagar).padStart(11)} | ${String(anticipado.totalPagar).padStart(10)}`);
+  });
+});

@@ -80,6 +80,7 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
   const [comisionPctVal, setComisionPctVal] = useState(c.comision_apertura_pct ? (Number(c.comision_apertura_pct) * 100).toString() : "2");
   const [comisionIva, setComisionIva] = useState<boolean>(c.comision_iva ?? true);
   const [ivaIntereses, setIvaIntereses] = useState<boolean>(c.iva_intereses ?? false);
+  const [modalidadInteres, setModalidadInteres] = useState<"vencido" | "anticipado">(c.modalidad_interes ?? "vencido");
 
   const [catalog, setCatalog] = useState<RateCatalogRow[]>([]);
   const [activando, setActivando] = useState(false);
@@ -128,11 +129,12 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
         comisionApertura: comisionMonto,
         comisionIva,
         ivaIntereses,
+        modalidadInteres,
       };
     } catch { return null; }
   }, [monto, plazoNum, tipoTasa, fixedRatePct, spreadPct, rateType, frecRevision,
       convencion, frecuencia, esquema, fechaDisp, fechaPrimer, graciaNum, tipoGracia,
-      crecimiento, comisionMonto, comisionIva, ivaIntereses]);
+      crecimiento, comisionMonto, comisionIva, ivaIntereses, modalidadInteres]);
 
   // ── Schedule + metrics (debounced) ──
   const [schedule, setSchedule] = useState<ResultadoSchedule | null>(null);
@@ -224,6 +226,7 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
         comision_apertura_pct: comisionModo === "pct" ? (Number(comisionPctVal) || 0) / 100 : null,
         comision_iva: comisionIva,
         iva_intereses: ivaIntereses,
+        modalidad_interes: modalidadInteres,
         cat: Math.round(metrics.cat * 10000) / 10000,
         tir: Math.round(metrics.tir * 10000) / 10000,
         periodo_gracia_meses: graciaNum,
@@ -366,6 +369,15 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
             <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
               <input type="checkbox" checked={ivaIntereses} onChange={(e) => setIvaIntereses(e.target.checked)} /> IVA en intereses
             </label>
+          </div>
+          {/* Modalidad de interés */}
+          {sec("Modalidad de interés")}
+          <div style={{ display: "flex", gap: 6 }}>
+            {(["vencido", "anticipado"] as const).map((m) => (
+              <button key={m} onClick={() => setModalidadInteres(m)} style={{ flex: 1, padding: "7px 0", fontSize: 13, fontFamily: "inherit", fontWeight: modalidadInteres === m ? 600 : 400, border: modalidadInteres === m ? "1px solid var(--amber)" : "1px solid var(--line)", borderRadius: 6, background: modalidadInteres === m ? "var(--amber-soft)" : "transparent", color: modalidadInteres === m ? "var(--amber)" : "var(--text-dim)", cursor: "pointer" }}>
+                {m === "vencido" ? "Vencido (al final)" : "Anticipado (al inicio)"}
+              </button>
+            ))}
           </div>
         </div>
 

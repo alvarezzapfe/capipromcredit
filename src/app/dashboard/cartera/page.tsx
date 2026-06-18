@@ -64,6 +64,7 @@ interface Credito {
   iva_intereses: boolean;
   cat: number | null;
   tir: number | null;
+  modalidad_interes: string;
 }
 
 interface Disposicion {
