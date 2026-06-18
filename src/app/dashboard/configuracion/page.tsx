@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase-client";
 import { mxn } from "@/lib/format";
-import { Settings, Download, Trash2, Plus, Pencil, ShieldAlert, Cloud, RefreshCw } from "lucide-react";
+import { Settings, Download, Trash2, Plus, ShieldAlert, Cloud, RefreshCw } from "lucide-react";
 import { useRol } from "@/lib/useRol";
 import { esSoloLectura } from "@/lib/rbac";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -409,12 +409,15 @@ function ModalVaciar({ scope, onClose, onDone }: { scope: string; onClose: () =>
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 function TabTasas({ readOnly, isMobile }: { readOnly: boolean; isMobile?: boolean }) {
+  const rol = useRol();
+  const esSuperAdmin = rol === "super_admin";
   const [rates, setRates] = useState<RateRow[]>([]);
   const [cargando, setCargando] = useState(true);
-  const [form, setForm] = useState({ rate_type: "TIIE_28", rate_date: "", rate_value: "" });
-  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState({ rate_type: "TIIE_28", rate_type_custom: "", rate_date: "", rate_value: "" });
+  const [usaCustom, setUsaCustom] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exito, setExito] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -426,34 +429,35 @@ function TabTasas({ readOnly, isMobile }: { readOnly: boolean; isMobile?: boolea
 
   useEffect(() => { cargar(); }, [cargar]);
 
+  // Dynamic rate types from existing data
+  const tiposExistentes = Array.from(new Set(rates.map((r) => r.rate_type)));
+
   async function guardar() {
     setError(null);
+    setExito(null);
+    const rateType = usaCustom ? form.rate_type_custom.trim().toUpperCase().replace(/\s+/g, "_") : form.rate_type;
     const val = Number(form.rate_value);
-    if (!form.rate_date) { setError("Fecha requerida"); return; }
-    if (!val || val <= 0) { setError("Valor debe ser > 0"); return; }
+    if (!rateType) { setError("Tipo de tasa requerido"); return; }
+    if (!form.rate_date) { setError("Fecha de vigencia requerida"); return; }
+    if (!val || val <= 0) { setError("Valor debe ser mayor a 0"); return; }
 
     setGuardando(true);
-    const sb = createClient();
-    const row = { rate_type: form.rate_type, rate_date: form.rate_date, rate_value: val / 100 };
-
-    if (editId) {
-      const { error: err } = await sb.from("rate_catalog").update(row).eq("id", editId);
-      if (err) { setError(err.message); setGuardando(false); return; }
-    } else {
-      const { error: err } = await sb.from("rate_catalog").insert(row);
-      if (err) { setError(err.message); setGuardando(false); return; }
+    try {
+      const res = await fetch("/api/configuracion/tasas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rate_type: rateType, rate_date: form.rate_date, rate_value: val / 100 }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Error desconocido");
+      setExito(`${RATE_TYPE_LABEL[rateType] ?? rateType} al ${form.rate_date}: ${val}%`);
+      setForm({ rate_type: rateType, rate_type_custom: "", rate_date: "", rate_value: "" });
+      setUsaCustom(false);
+      cargar();
+    } catch (e: any) {
+      setError(e.message);
     }
-
-    setForm({ rate_type: "TIIE_28", rate_date: "", rate_value: "" });
-    setEditId(null);
     setGuardando(false);
-    cargar();
-  }
-
-  function iniciarEdicion(r: RateRow) {
-    setEditId(r.id);
-    setForm({ rate_type: r.rate_type, rate_date: r.rate_date, rate_value: (Number(r.rate_value) * 100).toFixed(4) });
-    setError(null);
   }
 
   // Group latest rate per type for summary
@@ -477,45 +481,56 @@ function TabTasas({ readOnly, isMobile }: { readOnly: boolean; isMobile?: boolea
         ))}
       </div>
 
-      {/* Add/Edit form */}
-      {!readOnly && (
-        <div className="panel" style={{ padding: "16px 20px", marginBottom: 20 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>
-            {editId ? "Editar valor" : "Agregar nuevo valor"}
-          </h3>
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr auto", gap: 10, alignItems: "end" }}>
-            <div className="field">
-              <label>Tipo</label>
-              <select className="select" value={form.rate_type} onChange={(e) => setForm((f) => ({ ...f, rate_type: e.target.value }))}>
-                {Object.entries(RATE_TYPE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
-            </div>
-            <div className="field">
-              <label>Fecha</label>
-              <input className="input mono" type="date" value={form.rate_date} onChange={(e) => setForm((f) => ({ ...f, rate_date: e.target.value }))} />
-            </div>
-            <div className="field">
-              <label>Valor (%)</label>
-              <input className="input mono" type="number" step="0.0001" value={form.rate_value} onChange={(e) => setForm((f) => ({ ...f, rate_value: e.target.value }))} placeholder="6.7559" />
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button className="btn btn-primary" onClick={guardar} disabled={guardando} style={{ padding: "8px 14px", fontSize: 13 }}>
-                {editId ? <Pencil size={14} /> : <Plus size={14} />}
-                {guardando ? "…" : editId ? "Guardar" : "Agregar"}
-              </button>
-              {editId && (
-                <button className="btn btn-ghost" onClick={() => { setEditId(null); setForm({ rate_type: "TIIE_28", rate_date: "", rate_value: "" }); }} style={{ padding: "8px 10px", fontSize: 13 }}>
-                  Cancelar
-                </button>
-              )}
-            </div>
+      {/* Load rate form — super_admin only */}
+      <div className="panel" style={{ padding: "16px 20px", marginBottom: 20 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Cargar tasa</h3>
+        <p style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 12 }}>
+          Inserta un nuevo valor al historial del catálogo (no edita los anteriores).
+        </p>
+        {!esSuperAdmin ? (
+          <div style={{ fontSize: 13, color: "var(--text-faint)", display: "flex", alignItems: "center", gap: 6 }}>
+            <ShieldAlert size={14} /> Solo super admin puede cargar tasas
           </div>
-          {error && <div style={{ marginTop: 8, fontSize: 13, color: "var(--red)" }}>{error}</div>}
-        </div>
-      )}
+        ) : (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
+              <div className="field">
+                <label>Tipo de tasa</label>
+                {usaCustom ? (
+                  <input className="input mono" value={form.rate_type_custom} onChange={(e) => setForm((f) => ({ ...f, rate_type_custom: e.target.value }))} placeholder="NUEVO_TIPO" />
+                ) : (
+                  <select className="select" value={form.rate_type} onChange={(e) => setForm((f) => ({ ...f, rate_type: e.target.value }))}>
+                    {tiposExistentes.map((t) => <option key={t} value={t}>{RATE_TYPE_LABEL[t] ?? t}</option>)}
+                  </select>
+                )}
+                <label style={{ fontSize: 11.5, display: "flex", alignItems: "center", gap: 4, marginTop: 4, cursor: "pointer", color: "var(--text-dim)" }}>
+                  <input type="checkbox" checked={usaCustom} onChange={(e) => setUsaCustom(e.target.checked)} />
+                  Nuevo tipo
+                </label>
+              </div>
+              <div className="field">
+                <label>Fecha de vigencia</label>
+                <input className="input mono" type="date" value={form.rate_date} onChange={(e) => setForm((f) => ({ ...f, rate_date: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label>Valor (%)</label>
+                <input className="input mono" type="number" step="0.0001" value={form.rate_value} onChange={(e) => setForm((f) => ({ ...f, rate_value: e.target.value }))} placeholder="6.7559" />
+              </div>
+            </div>
+            <button className="btn btn-primary" onClick={guardar} disabled={guardando} style={{ padding: "8px 16px", fontSize: 13 }}>
+              <Plus size={14} strokeWidth={1.75} /> {guardando ? "Guardando…" : "Cargar tasa"}
+            </button>
+            {error && <div style={{ marginTop: 8, fontSize: 13, color: "var(--red)" }}>{error}</div>}
+            {exito && <div style={{ marginTop: 8, fontSize: 13, color: "var(--green)" }}>Cargada: {exito}</div>}
+          </>
+        )}
+      </div>
 
-      {/* Table */}
+      {/* History table */}
       <div className="panel" style={{ overflow: "hidden" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--line)" }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600 }}>Historial de tasas</h3>
+        </div>
         {cargando ? (
           <div style={{ padding: 44, textAlign: "center", color: "var(--text-faint)" }}>Cargando…</div>
         ) : rates.length === 0 ? (
@@ -528,9 +543,8 @@ function TabTasas({ readOnly, isMobile }: { readOnly: boolean; isMobile?: boolea
               <thead>
                 <tr>
                   <th>Tipo</th>
-                  <th>Fecha</th>
+                  <th>Fecha de vigencia</th>
                   <th style={{ textAlign: "right" }}>Valor</th>
-                  {!readOnly && <th style={{ width: 60 }}></th>}
                 </tr>
               </thead>
               <tbody>
@@ -543,17 +557,6 @@ function TabTasas({ readOnly, isMobile }: { readOnly: boolean; isMobile?: boolea
                     </td>
                     <td className="mono" style={{ fontSize: 13 }}>{r.rate_date}</td>
                     <td className="mono" style={{ textAlign: "right", fontSize: 13, fontWeight: 600 }}>{fmtPct(Number(r.rate_value))}</td>
-                    {!readOnly && (
-                      <td>
-                        <button
-                          onClick={() => iniciarEdicion(r)}
-                          style={{ background: "none", border: "none", cursor: "pointer", padding: 4, color: "var(--text-dim)" }}
-                          title="Editar"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                      </td>
-                    )}
                   </tr>
                 ))}
               </tbody>
