@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { generarSchedule, type ParamsSchedule } from "../schedule";
+import { type RateCatalogRow } from "../accrual";
 import { calcularCAT, calcularTIR, calcularDuracion, calcularNPV, saldoInsolutoCupones } from "../metrics";
 
 // ── Caso de referencia ──
@@ -185,5 +186,95 @@ describe("Saldo insoluto y NPV — crédito en curso", () => {
     const saldo = saldoInsolutoCupones(r.cupones, fechaCorte, PARAMS_EN_CURSO.monto);
     const npvBaja = calcularNPV(r.cupones, 0.10, fechaCorte);
     expect(npvBaja).toBeGreaterThan(saldo);
+  });
+});
+
+// ── Saldo línea multi-disposición (CP-3472327) ──
+
+describe("Saldo línea multi-disposición — CP-3472327", () => {
+  // Datos reales: línea $52M, 2 disposiciones, 60m, francés, gracia 24m,
+  // TIIE_28 + 6%, ACT/360, origen 2025-08-01
+  const CATALOG_TIIE: RateCatalogRow[] = [
+    { rate_type: "TIIE_28", rate_date: "2026-05-29", rate_value: 0.067559 },
+    { rate_type: "TIIE_28", rate_date: "2025-07-31", rate_value: 0.082339 },
+  ];
+
+  const DISP1 = { monto: 24_217_019, fecha: "2025-08-15" };
+  const DISP2 = { monto: 11_129_098, fecha: "2025-08-15" };
+  const TOTAL_DISPUESTO = DISP1.monto + DISP2.monto; // 35,346,117
+
+  // Contradicciones en datos reales (reportadas, no resueltas por el motor):
+  // - esquema='frances' vs metodo_amort='lineal'
+  // - periodo_gracia_meses=24 vs tipo_gracia='ninguna'
+  // Usamos: esquema='frances', gracia=24m, tipoGracia='solo_interes' (default sensato)
+
+  const fechaCorte = "2026-06-19"; // hoy — dentro del periodo de gracia (< 24m desde ago 2025)
+
+  function buildParams(monto: number, fecha: string): ParamsSchedule {
+    return {
+      monto,
+      fechaDisposicion: fecha,
+      fechaPrimerPago: "2025-09-15", // 1 mes después
+      plazoMeses: 60,
+      frecuencia: "mensual",
+      esquema: "frances",
+      rateType: "TIIE_28",
+      spread: 0.06,
+      fixedRate: null,
+      convencionDias: "ACT/360",
+      frecuenciaRevision: null,
+      graciaMeses: 24,
+      tipoGracia: "solo_interes",
+      comisionApertura: 0,
+      comisionIva: false,
+      ivaIntereses: false,
+    };
+  }
+
+  it("durante gracia (24m), saldo de cada disposición = su monto completo", () => {
+    const s1 = generarSchedule(buildParams(DISP1.monto, DISP1.fecha), CATALOG_TIIE);
+    const saldo1 = saldoInsolutoCupones(s1.cupones, fechaCorte, DISP1.monto);
+    expect(saldo1).toBe(DISP1.monto);
+
+    const s2 = generarSchedule(buildParams(DISP2.monto, DISP2.fecha), CATALOG_TIIE);
+    const saldo2 = saldoInsolutoCupones(s2.cupones, fechaCorte, DISP2.monto);
+    expect(saldo2).toBe(DISP2.monto);
+  });
+
+  it("saldo total = suma de disposiciones = $35,346,117", () => {
+    const s1 = generarSchedule(buildParams(DISP1.monto, DISP1.fecha), CATALOG_TIIE);
+    const s2 = generarSchedule(buildParams(DISP2.monto, DISP2.fecha), CATALOG_TIIE);
+    const saldo1 = saldoInsolutoCupones(s1.cupones, fechaCorte, DISP1.monto);
+    const saldo2 = saldoInsolutoCupones(s2.cupones, fechaCorte, DISP2.monto);
+    const total = saldo1 + saldo2;
+
+    console.log("\n=== CP-3472327 — Saldo línea multi-disposición ===");
+    console.log(`Disp #1: $${DISP1.monto.toLocaleString()} (${DISP1.fecha}) → saldo: $${saldo1.toLocaleString()}`);
+    console.log(`Disp #2: $${DISP2.monto.toLocaleString()} (${DISP2.fecha}) → saldo: $${saldo2.toLocaleString()}`);
+    console.log(`Total dispuesto: $${TOTAL_DISPUESTO.toLocaleString()}`);
+    console.log(`Saldo total calculado: $${total.toLocaleString()}`);
+    console.log(`Línea autorizada (monto): $52,000,000 ← NO es el saldo`);
+    console.log("\nContradicciones en datos:");
+    console.log("  esquema='frances' vs metodo_amort='lineal' → se usa esquema");
+    console.log("  periodo_gracia_meses=24 vs tipo_gracia='ninguna' → se usa solo_interes");
+
+    expect(total).toBe(TOTAL_DISPUESTO);
+  });
+
+  it("cada disposición tiene 60 cupones (24 gracia + 36 amort)", () => {
+    const s = generarSchedule(buildParams(DISP1.monto, DISP1.fecha), CATALOG_TIIE);
+    expect(s.cupones).toHaveLength(60);
+    // Primeros 24: capital = 0 (gracia)
+    for (let i = 0; i < 24; i++) expect(s.cupones[i].capital).toBe(0);
+    // Cupón 25+: capital > 0
+    expect(s.cupones[24].capital).toBeGreaterThan(0);
+  });
+
+  it("Σcapital de cada disposición = su monto", () => {
+    const s1 = generarSchedule(buildParams(DISP1.monto, DISP1.fecha), CATALOG_TIIE);
+    expect(s1.totalCapital).toBe(DISP1.monto);
+
+    const s2 = generarSchedule(buildParams(DISP2.monto, DISP2.fecha), CATALOG_TIIE);
+    expect(s2.totalCapital).toBe(DISP2.monto);
   });
 });
