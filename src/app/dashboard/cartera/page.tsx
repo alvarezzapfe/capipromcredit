@@ -17,7 +17,13 @@ import { useIsMobile } from "@/lib/useIsMobile";
 import { ModalAltaCliente } from "@/components/ModalAltaCliente";
 import { WizardActivar } from "@/components/WizardActivar";
 import { rateLabel } from "@/lib/credit-engine/rate-label";
-import { calcularNPV, type CuponSchedule } from "@/lib/credit-engine";
+import {
+  calcularNPV, generarSchedule, saldoInsolutoCupones,
+  type CuponSchedule, type ParamsSchedule, type FrecuenciaWizard,
+  type EsquemaPreset, type ConvencionDias, type RateCatalogRow,
+  type BaseCalendario, type InteresBase, type SupuestoForward,
+  MESES_POR_PERIODO,
+} from "@/lib/credit-engine";
 
 interface Credito {
   id: string;
@@ -67,6 +73,10 @@ interface Credito {
   tir: number | null;
   modalidad_interes: string;
   saldo_override: number | null;
+  base_calendario: string;
+  num_pagos_capital: number | null;
+  supuesto_forward: string;
+  interes_base: string;
 }
 
 interface Disposicion {
@@ -84,6 +94,62 @@ function tasaLabel(c: Credito): string {
     spread: c.spread != null ? Number(c.spread) : null,
     fixed_rate: c.fixed_rate != null ? Number(c.fixed_rate) : null,
   });
+}
+
+/** Saldo insoluto de una línea multi-disposición: schedule por disposición + suma. */
+function calcularSaldoLineaMultiple(
+  c: Credito, disps: Disposicion[], catalog: RateCatalogRow[], fechaCorte: string,
+): number {
+  if (disps.length === 0) return 0;
+  const freq = (Object.keys(MESES_POR_PERIODO) as FrecuenciaWizard[]).includes(c.frecuencia as FrecuenciaWizard)
+    ? (c.frecuencia as FrecuenciaWizard) : "mensual" as FrecuenciaWizard;
+  const mpp = MESES_POR_PERIODO[freq];
+  let tipoGracia: "sin_pago" | "solo_interes" | "capitaliza_interes" = "solo_interes";
+  if (c.tipo_gracia === "total") tipoGracia = "capitaliza_interes";
+  const baseCalendario = (c.base_calendario as BaseCalendario) ?? "aniversario";
+  const interesBase = (c.interes_base as InteresBase) ?? "apertura";
+  const supuesto: SupuestoForward = c.supuesto_forward === "cero" ? "cero" : "ultima_conocida";
+
+  let total = 0;
+  for (const d of disps) {
+    const montoDisp = Number(d.monto);
+    if (montoDisp <= 0) continue;
+    try {
+      const params: ParamsSchedule = {
+        monto: montoDisp,
+        fechaDisposicion: d.fecha,
+        fechaPrimerPago: addMesesHelper(d.fecha, mpp),
+        plazoMeses: Number(c.plazo_meses) || 60,
+        frecuencia: freq,
+        esquema: (c.esquema as EsquemaPreset) || "frances",
+        rateType: c.rate_type ?? null,
+        spread: c.spread != null ? Number(c.spread) : null,
+        fixedRate: c.fixed_rate != null ? Number(c.fixed_rate) : null,
+        convencionDias: (c.convencion_dias as ConvencionDias) || "ACT/360",
+        frecuenciaRevision: c.frecuencia_revision ?? null,
+        graciaMeses: Number(c.periodo_gracia_meses) || 0,
+        tipoGracia,
+        comisionApertura: 0, comisionIva: false, ivaIntereses: false,
+        baseCalendario, interesBase, supuestoForward: supuesto,
+        numPagosCapital: c.num_pagos_capital ?? null,
+      };
+      const schedule = generarSchedule(params, catalog);
+      total += saldoInsolutoCupones(schedule.cupones, fechaCorte, montoDisp);
+    } catch {
+      total += montoDisp; // conservative fallback
+    }
+  }
+  return Math.round(total * 100) / 100;
+}
+
+function addMesesHelper(fecha: string, meses: number): string {
+  const [y, m, d] = fecha.split("-").map(Number);
+  const total = y * 12 + (m - 1) + meses;
+  const ny = Math.floor(total / 12);
+  const nm = (total % 12) + 1;
+  const maxDay = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
+  const nd = Math.min(d, maxDay);
+  return `${ny}-${String(nm).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
 }
 
 function graciaLabel(c: Credito): string {
@@ -155,6 +221,29 @@ export default function Cartera() {
           si[c.id] = Number(c.saldo_override);
         }
       }
+
+      // Multi-disposition credits WITHOUT amortization: schedule por disposición
+      const multiNoAmort = creds.filter(
+        (c) => c.tipo_disposicion === "multiple"
+          && ["vigente", "en_mora"].includes(c.estatus)
+          && !si.hasOwnProperty(c.id)
+          && !(c.saldo_override != null && c.saldo_override > 0),
+      );
+      if (multiNoAmort.length > 0) {
+        const multiIds = multiNoAmort.map((c) => c.id);
+        const [{ data: dispData }, { data: catData }] = await Promise.all([
+          supabase.from("disposiciones").select("*").in("credito_id", multiIds),
+          supabase.from("rate_catalog").select("rate_type, rate_date, rate_value").order("rate_date", { ascending: false }),
+        ]);
+        const hoy = new Date().toISOString().slice(0, 10);
+        for (const c of multiNoAmort) {
+          const disps = ((dispData ?? []) as Disposicion[]).filter((d) => d.credito_id === c.id);
+          if (disps.length > 0) {
+            si[c.id] = calcularSaldoLineaMultiple(c, disps, (catData ?? []) as RateCatalogRow[], hoy);
+          }
+        }
+      }
+
       setSaldosInsolutos(si);
     }
 

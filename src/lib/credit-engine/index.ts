@@ -22,6 +22,9 @@ export {
   type FrecuenciaWizard,
   type TipoGraciaWizard,
   type EsquemaPreset,
+  type BaseCalendario,
+  type InteresBase,
+  type SupuestoForward,
 } from "./schedule";
 export {
   calcularCAT,

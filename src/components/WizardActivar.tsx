@@ -23,6 +23,9 @@ import {
   type EsquemaPreset,
   type TipoGraciaWizard,
   type ConvencionDias,
+  type BaseCalendario,
+  type InteresBase,
+  type SupuestoForward,
 } from "@/lib/credit-engine";
 import { rateLabel, fmtPct } from "@/lib/credit-engine/rate-label";
 import { ConfirmModal } from "@/components/ConfirmModal";
@@ -84,6 +87,10 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
   const [comisionIva, setComisionIva] = useState<boolean>(c.comision_iva ?? true);
   const [ivaIntereses, setIvaIntereses] = useState<boolean>(c.iva_intereses ?? false);
   const [modalidadInteres, setModalidadInteres] = useState<"vencido" | "anticipado">(c.modalidad_interes ?? "vencido");
+  const [baseCalendario, setBaseCalendario] = useState<"aniversario" | "fin_de_mes">(c.base_calendario ?? "aniversario");
+  const [numPagosCapital, setNumPagosCapital] = useState(c.num_pagos_capital?.toString() ?? "");
+  const [supuestoForward, setSupuestoForward] = useState(c.supuesto_forward ?? "ultima_conocida");
+  const [interesBase, setInteresBase] = useState<"apertura" | "cierre">(c.interes_base ?? "apertura");
 
   const [saldoOverride, setSaldoOverride] = useState(c.saldo_override?.toString() ?? "");
 
@@ -135,11 +142,16 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
         comisionIva,
         ivaIntereses,
         modalidadInteres,
+        baseCalendario,
+        numPagosCapital: numPagosCapital ? Number(numPagosCapital) : null,
+        supuestoForward: supuestoForward === "cero" ? "cero" : supuestoForward === "ultima_conocida" ? "ultima_conocida" : Number(supuestoForward) || "ultima_conocida",
+        interesBase,
       };
     } catch { return null; }
   }, [monto, plazoNum, tipoTasa, fixedRatePct, spreadPct, rateType, frecRevision,
       convencion, frecuencia, esquema, fechaDisp, fechaPrimer, graciaNum, tipoGracia,
-      crecimiento, comisionMonto, comisionIva, ivaIntereses, modalidadInteres]);
+      crecimiento, comisionMonto, comisionIva, ivaIntereses, modalidadInteres,
+      baseCalendario, numPagosCapital, supuestoForward, interesBase]);
 
   // ── Schedule + metrics (debounced) ──
   const [schedule, setSchedule] = useState<ResultadoSchedule | null>(null);
@@ -236,6 +248,10 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
         comision_iva: comisionIva,
         iva_intereses: ivaIntereses,
         modalidad_interes: modalidadInteres,
+        base_calendario: baseCalendario,
+        num_pagos_capital: numPagosCapital ? Number(numPagosCapital) : null,
+        supuesto_forward: supuestoForward,
+        interes_base: interesBase,
         cat: Math.round(metrics.cat * 10000) / 10000,
         tir: Math.round(metrics.tir * 10000) / 10000,
         saldo_override: saldoOverride && Number(saldoOverride) > 0 ? Number(saldoOverride) : null,
@@ -404,6 +420,38 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
               Interés del primer periodo cobrado en la disposición: <strong className="mono">{mxn(schedule.interesAnticipadoInicial)}</strong>
             </div>
           )}
+
+          {/* Avanzado */}
+          {sec("Avanzado")}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div className="field">
+              <label>Calendario</label>
+              <select className="select" value={baseCalendario} onChange={(e) => setBaseCalendario(e.target.value as "aniversario" | "fin_de_mes")}>
+                <option value="aniversario">Aniversario</option>
+                <option value="fin_de_mes">Fin de mes</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Base interés</label>
+              <select className="select" value={interesBase} onChange={(e) => setInteresBase(e.target.value as "apertura" | "cierre")}>
+                <option value="apertura">Saldo apertura</option>
+                <option value="cierre">Saldo cierre</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+            <div className="field">
+              <label>Pagos de capital (opcional)</label>
+              <input className="input mono" type="number" value={numPagosCapital} onChange={(e) => setNumPagosCapital(e.target.value)} placeholder="Auto (plazo−gracia)" />
+            </div>
+            <div className="field">
+              <label>Supuesto forward</label>
+              <select className="select" value={supuestoForward} onChange={(e) => setSupuestoForward(e.target.value)}>
+                <option value="ultima_conocida">Última conocida</option>
+                <option value="cero">Cero (solo spread)</option>
+              </select>
+            </div>
+          </div>
         </div>
 
         {/* ── RIGHT: Metrics ── */}
