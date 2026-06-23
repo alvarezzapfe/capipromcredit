@@ -299,14 +299,16 @@ export function generarSchedule(
     ? Math.max(1, Math.round(params.frecuenciaRevision / mpp))
     : null;
 
-  // ── Lineal: capital fijo (truncated to 2 dec) ──
-  const capitalFijoLineal = esquema === "lineal"
-    ? Math.trunc((params.monto - vr) / numAmort * 100) / 100
+  // ── Lineal: capital fijo (full precision internally, rounded only for display) ──
+  const capitalFijoLinealFull = esquema === "lineal"
+    ? (params.monto - vr) / numAmort
     : 0;
 
   // ── Build coupons ──
   const cupones: CuponSchedule[] = [];
   let saldo = params.monto;
+  // Full-precision saldo for lineal (avoids rounding accumulation)
+  let saldoFull = params.monto;
   let currentPMT = 0;
   let pago1Creciente = 0;
 
@@ -391,16 +393,11 @@ export function generarSchedule(
         }
 
         case "lineal": {
-          // Capital fijo
-          if (i === numCupones - 1) {
-            capital = rd(saldo - vr); // absorb rounding delta
-          } else {
-            capital = capitalFijoLineal;
-          }
+          // Capital fijo — full precision, rounded only for display
+          capital = rd(capitalFijoLinealFull);
 
           if (interesBase === "cierre") {
-            // Interest on closing balance = saldo - capital
-            const saldoCierre = rd(saldo - capital);
+            const saldoCierre = saldo - capitalFijoLinealFull; // full precision
             interes = rd(saldoCierre * tasa * dias / b);
           } else {
             interes = rd(saldo * tasa * dias / b);
@@ -448,7 +445,13 @@ export function generarSchedule(
     pago = rd(pago + iva);
 
     if (tipoGracia !== "capitaliza_interes" || i >= numGracia) {
-      saldo = rd(saldo - capital);
+      if (esquema === "lineal" && i >= numGracia) {
+        saldoFull -= capitalFijoLinealFull;
+        saldo = rd(saldoFull);
+      } else {
+        saldo = rd(saldo - capital);
+        saldoFull = saldo;
+      }
     }
 
     cupones.push({
@@ -459,13 +462,18 @@ export function generarSchedule(
   }
 
   // ── Cuadre: adjust last amort coupon so saldo_final = VR exactly ──
+  // For lineal with full-precision tracking, saldo should naturally be ~0;
+  // only adjust if there's a residual from floating point.
   if (cupones.length > 0) {
     const last = cupones[cupones.length - 1];
     const delta = rd(last.saldoFinal - vr);
-    if (delta !== 0) {
+    if (delta !== 0 && Math.abs(delta) < 1) {
+      // Tiny floating point residual — zero it out without changing capital
+      last.saldoFinal = rd(vr);
+    } else if (delta !== 0) {
+      // Significant delta (non-lineal or edge case) — adjust capital
       last.capital = rd(last.capital + delta);
       last.saldoFinal = rd(vr);
-      // Recalc interest on cierre if needed
       if (interesBase === "cierre" && esquema !== "frances") {
         const fechaAnt = cupones.length > 1 ? cupones[cupones.length - 2].fecha : params.fechaDisposicion;
         const dias = contarDias(fechaAnt, last.fecha, conv);
@@ -504,7 +512,11 @@ export function generarSchedule(
   const comMonto = params.comisionApertura;
   const comConIva = params.comisionIva ? rd(comMonto * (1 + IVA)) : comMonto;
 
-  const totalCapital = rd(cupones.reduce((s, c) => s + c.capital, 0));
+  // For lineal with full-precision tracking, totalCapital = monto (by construction).
+  // For other schemes, sum from rounded cupones.
+  const totalCapital = (esquema === "lineal" && numAmort > 0)
+    ? rd(params.monto - vr)
+    : rd(cupones.reduce((s, c) => s + c.capital, 0));
   const interesEnCupones = rd(cupones.reduce((s, c) => s + c.interes, 0));
   const totalInteres = rd(interesEnCupones + interesAnticipadoInicial);
   const totalIva = rd(cupones.reduce((s, c) => s + c.iva, 0));

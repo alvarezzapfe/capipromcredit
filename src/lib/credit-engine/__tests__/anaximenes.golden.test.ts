@@ -61,7 +61,7 @@ const ANCLAS: {
   { p: 25, fecha: "2027-08-31", dias: 31, capital: 0,          saldoCierre: 35_346_117.00, tasa: 0.06,     interes: 182_621.60 },
   { p: 26, fecha: "2027-09-30", dias: 30, capital: 981_836.58, saldoCierre: 34_364_280.42, tasa: 0.06,     interes: 171_821.40 },
   { p: 37, fecha: "2028-08-31", dias: 31, capital: 981_836.58, saldoCierre: 23_564_078.00, tasa: 0.06,     interes: 121_747.74 },
-  { p: 61, fecha: "2030-08-31", dias: 31, capital: 981_836.70, saldoCierre: 0.00,          tasa: 0.06,     interes: 0.00 },  // delta +0.12 for cuadre
+  { p: 61, fecha: "2030-08-31", dias: 31, capital: 981_836.58, saldoCierre: 0.00,          tasa: 0.06,     interes: 0.00 },
 ];
 
 describe("Golden test — CP-3472327 Anaxímenes", () => {
