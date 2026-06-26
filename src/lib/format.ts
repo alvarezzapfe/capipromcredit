@@ -96,6 +96,27 @@ export const GRACIA_WIZARD_LABEL: Record<string, string> = {
   capitaliza_interes: "Capitaliza interés",
 };
 
+/**
+ * Traduce tipo_gracia de BD ('ninguna'|'capital'|'total') al tipo del motor schedule
+ * ('sin_pago'|'solo_interes'|'capitaliza_interes').
+ * Mapeo: 'capital' → 'solo_interes', 'total' → 'capitaliza_interes', 'ninguna' → 'solo_interes' (fallback).
+ */
+export function tipoGraciaBdToMotor(bd: string | null | undefined): "sin_pago" | "solo_interes" | "capitaliza_interes" {
+  if (bd === "total") return "capitaliza_interes";
+  if (bd === "capital") return "solo_interes";
+  return "solo_interes"; // 'ninguna' or null: fallback (gracia check is separate via graciaMeses)
+}
+
+/**
+ * Traduce tipo_gracia del motor schedule al valor de BD.
+ * Mapeo: 'solo_interes' → 'capital', 'capitaliza_interes' → 'total', 'sin_pago' → 'ninguna'.
+ */
+export function tipoGraciaMotorToBd(motor: string): "ninguna" | "capital" | "total" {
+  if (motor === "solo_interes") return "capital";
+  if (motor === "capitaliza_interes") return "total";
+  return "ninguna";
+}
+
 export const GARANTIA_LABEL: Record<string, string> = {
   quirografaria: "Quirografaria",
   fideicomiso_flujo: "Fideicomiso",

@@ -2,12 +2,14 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase-client";
-import { mxn } from "@/lib/format";
 import {
+  mxn,
   FRECUENCIA_WIZARD_LABEL,
   ESQUEMA_LABEL,
   CONVENCION_LABEL,
   GRACIA_WIZARD_LABEL,
+  tipoGraciaBdToMotor,
+  tipoGraciaMotorToBd,
 } from "@/lib/format";
 import {
   generarSchedule,
@@ -76,7 +78,7 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
   const [crecimiento, setCrecimiento] = useState("5");
 
   const [graciaMeses, setGraciaMeses] = useState(String(c.periodo_gracia_meses ?? 0));
-  const [tipoGracia, setTipoGracia] = useState<TipoGraciaWizard>("solo_interes");
+  const [tipoGracia, setTipoGracia] = useState<TipoGraciaWizard>(tipoGraciaBdToMotor(c.tipo_gracia));
 
   const [fechaDisp, setFechaDisp] = useState(c.fecha_origen ?? new Date().toISOString().slice(0, 10));
   const [fechaPrimer, setFechaPrimer] = useState(c.fecha_primer_pago ?? addMeses(c.fecha_origen ?? new Date().toISOString().slice(0, 10), 1));
@@ -256,7 +258,7 @@ export function WizardActivar({ credito, onActivated, isMobile }: Props) {
         tir: Math.round(metrics.tir * 10000) / 10000,
         saldo_override: saldoOverride && Number(saldoOverride) > 0 ? Number(saldoOverride) : null,
         periodo_gracia_meses: graciaNum,
-        tipo_gracia: tipoGracia === "solo_interes" ? "capital" : tipoGracia === "capitaliza_interes" ? "total" : "ninguna",
+        tipo_gracia: tipoGraciaMotorToBd(tipoGracia),
       }).eq("id", c.id);
 
       if (updErr) throw new Error(updErr.message);

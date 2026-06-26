@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase-client";
-import { mxn, pct, fecha, labelEstatus, ESTATUS_CREDITO, TIPO_PRODUCTO_LABEL, TIPO_PRODUCTO_FULL, GARANTIA_LABEL } from "@/lib/format";
+import { mxn, pct, fecha, labelEstatus, ESTATUS_CREDITO, TIPO_PRODUCTO_LABEL, TIPO_PRODUCTO_FULL, GARANTIA_LABEL, tipoGraciaBdToMotor } from "@/lib/format";
 import { Briefcase, Plus, Trash2, Upload, Download } from "lucide-react";
 import {
   generarTablaAmortizacion, calcularGraciaPeridos,
@@ -104,8 +104,7 @@ function calcularSaldoLineaMultiple(
   const freq = (Object.keys(MESES_POR_PERIODO) as FrecuenciaWizard[]).includes(c.frecuencia as FrecuenciaWizard)
     ? (c.frecuencia as FrecuenciaWizard) : "mensual" as FrecuenciaWizard;
   const mpp = MESES_POR_PERIODO[freq];
-  let tipoGracia: "sin_pago" | "solo_interes" | "capitaliza_interes" = "solo_interes";
-  if (c.tipo_gracia === "total") tipoGracia = "capitaliza_interes";
+  const tipoGracia = tipoGraciaBdToMotor(c.tipo_gracia);
   const baseCalendario = (c.base_calendario as BaseCalendario) ?? "aniversario";
   const interesBase = (c.interes_base as InteresBase) ?? "apertura";
   const supuesto: SupuestoForward = c.supuesto_forward === "cero" ? "cero" : "ultima_conocida";
