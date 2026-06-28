@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase-client";
 import { mxn, fecha } from "@/lib/format";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { calcularSaldoMultiDisposicion, type RateCatalogRow } from "@/lib/credit-engine";
 import {
   AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer,
@@ -44,6 +45,24 @@ interface CreditoMin {
   id: string;
   acreditado: string;
   estatus: string;
+  tipo_disposicion?: string;
+  tipo_producto?: string;
+  monto?: number;
+  frecuencia?: string;
+  tipo_gracia?: string;
+  base_calendario?: string;
+  interes_base?: string;
+  supuesto_forward?: string;
+  plazo_meses?: number;
+  esquema?: string;
+  rate_type?: string | null;
+  spread?: number | null;
+  fixed_rate?: number | null;
+  convencion_dias?: string;
+  frecuencia_revision?: number | null;
+  periodo_gracia_meses?: number;
+  num_pagos_capital?: number | null;
+  saldo_override?: number | null;
 }
 
 export default function Resumen() {
@@ -53,13 +72,14 @@ export default function Resumen() {
   const [proximos, setProximos] = useState<CuponView[]>([]);
   const [amortRows, setAmortRows] = useState<AmortMin[]>([]);
   const [creditoRows, setCreditoRows] = useState<CreditoMin[]>([]);
+  const [saldoMap, setSaldoMap] = useState<Map<string, number>>(new Map());
   const [rateChip, setRateChip] = useState("");
 
   useEffect(() => {
     (async () => {
       const sb = createClient();
       const [creditosRes, cuponesRes, solicitudesRes, amortRes] = await Promise.all([
-        sb.from("creditos").select("id, acreditado, monto, estatus, tipo_producto"),
+        sb.from("creditos").select("*"),
         sb.from("v_proximos_cupones").select("*").limit(8),
         sb.from("solicitudes").select("id").eq("estatus", "nueva"),
         sb.from("amortizacion").select("credito_id, fecha_pago, pago_total, saldo_inicial, pagado, numero_cupon").eq("pagado", false).order("numero_cupon", { ascending: true }),
@@ -93,12 +113,36 @@ export default function Resumen() {
         }
       }
 
+      // Add multi-disposition credits without amortization
+      const multiNoAmort = creditos.filter(
+        (c: any) => c.tipo_disposicion === "multiple"
+          && ["vigente", "en_mora"].includes(c.estatus)
+          && !saldoPorCredito.has(c.id),
+      );
+      if (multiNoAmort.length > 0) {
+        const multiIds = multiNoAmort.map((c: any) => c.id);
+        const [{ data: dispData }, { data: catData }] = await Promise.all([
+          sb.from("disposiciones").select("*").in("credito_id", multiIds),
+          sb.from("rate_catalog").select("rate_type, rate_date, rate_value").order("rate_date", { ascending: false }),
+        ]);
+        const hoy = new Date().toISOString().slice(0, 10);
+        for (const c of multiNoAmort) {
+          const disps = ((dispData ?? []) as any[]).filter((d: any) => d.credito_id === c.id);
+          if (disps.length > 0) {
+            const saldo = calcularSaldoMultiDisposicion(c as any, disps, (catData ?? []) as RateCatalogRow[], hoy);
+            saldoPorCredito.set(c.id, saldo);
+            saldoTotal += saldo;
+          }
+        }
+      }
+
       setKpis({
         creditosActivos: creditos.filter((c) => ["vigente", "en_mora"].includes(c.estatus)).length,
         saldoTotal,
         porCobrar30: cupones.filter((c) => c.dias_al_cupon >= 0 && c.dias_al_cupon <= 30).reduce((s, c) => s + Number(c.pago_total), 0),
         solicitudesNuevas: (solicitudesRes.data ?? []).length,
       });
+      setSaldoMap(new Map(saldoPorCredito));
       setProximos(cupones);
       setAmortRows(amort);
       setCreditoRows(creditos.map((c) => ({ id: c.id, acreditado: c.acreditado, estatus: c.estatus })));
@@ -131,26 +175,21 @@ export default function Resumen() {
       .map(([mes, valor]) => ({ mes, valor }));
   }, [amortRows]);
 
-  /* ── Chart B: saldo por acreditado (activos) ── */
+  /* ── Chart B: saldo por acreditado (activos) — uses saldoMap which includes multi-disp ── */
   const donutData = useMemo(() => {
-    const activos = new Set(
-      creditoRows.filter((c) => ["vigente", "en_mora"].includes(c.estatus)).map((c) => c.id)
-    );
+    const activos = creditoRows.filter((c) => ["vigente", "en_mora"].includes(c.estatus));
     const map = new Map<string, number>();
-    amortRows.forEach((a) => {
-      if (!activos.has(a.credito_id)) return;
-      const cr = creditoRows.find((c) => c.id === a.credito_id);
-      if (!cr) return;
-      if (!map.has(cr.acreditado)) {
-        // first unpaid cupon = saldo insoluto (rows ordered by numero_cupon asc)
-        map.set(cr.acreditado, Number(a.saldo_inicial));
+    for (const cr of activos) {
+      const saldo = saldoMap.get(cr.id);
+      if (saldo != null && saldo > 0) {
+        map.set(cr.acreditado, (map.get(cr.acreditado) ?? 0) + saldo);
       }
-    });
+    }
     return Array.from(map.entries())
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 6);
-  }, [amortRows, creditoRows]);
+  }, [creditoRows, saldoMap]);
 
   const gap = m ? 16 : 24;
 

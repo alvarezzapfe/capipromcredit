@@ -34,3 +34,8 @@ export {
   saldoInsolutoCupones,
   type DuracionResult,
 } from "./metrics";
+export {
+  calcularSaldoMultiDisposicion,
+  type CreditoMultiDisp,
+  type DisposicionMin,
+} from "./saldo-multi";

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase-client";
-import { mxn, pct, fecha, labelEstatus, ESTATUS_CREDITO, TIPO_PRODUCTO_LABEL, TIPO_PRODUCTO_FULL, GARANTIA_LABEL, tipoGraciaBdToMotor } from "@/lib/format";
+import { mxn, pct, fecha, labelEstatus, ESTATUS_CREDITO, TIPO_PRODUCTO_LABEL, TIPO_PRODUCTO_FULL, GARANTIA_LABEL } from "@/lib/format";
 import { Briefcase, Plus, Trash2, Upload, Download } from "lucide-react";
 import {
   generarTablaAmortizacion, calcularGraciaPeridos,
@@ -18,11 +18,8 @@ import { ModalAltaCliente } from "@/components/ModalAltaCliente";
 import { WizardActivar } from "@/components/WizardActivar";
 import { rateLabel } from "@/lib/credit-engine/rate-label";
 import {
-  calcularNPV, generarSchedule, saldoInsolutoCupones,
-  type CuponSchedule, type ParamsSchedule, type FrecuenciaWizard,
-  type EsquemaPreset, type ConvencionDias, type RateCatalogRow,
-  type BaseCalendario, type InteresBase, type SupuestoForward,
-  MESES_POR_PERIODO,
+  calcularNPV, calcularSaldoMultiDisposicion,
+  type CuponSchedule, type RateCatalogRow,
 } from "@/lib/credit-engine";
 
 interface Credito {
@@ -96,60 +93,6 @@ function tasaLabel(c: Credito): string {
   });
 }
 
-/** Saldo insoluto de una línea multi-disposición: schedule por disposición + suma. */
-function calcularSaldoLineaMultiple(
-  c: Credito, disps: Disposicion[], catalog: RateCatalogRow[], fechaCorte: string,
-): number {
-  if (disps.length === 0) return 0;
-  const freq = (Object.keys(MESES_POR_PERIODO) as FrecuenciaWizard[]).includes(c.frecuencia as FrecuenciaWizard)
-    ? (c.frecuencia as FrecuenciaWizard) : "mensual" as FrecuenciaWizard;
-  const mpp = MESES_POR_PERIODO[freq];
-  const tipoGracia = tipoGraciaBdToMotor(c.tipo_gracia);
-  const baseCalendario = (c.base_calendario as BaseCalendario) ?? "aniversario";
-  const interesBase = (c.interes_base as InteresBase) ?? "apertura";
-  const supuesto: SupuestoForward = c.supuesto_forward === "cero" ? "cero" : "ultima_conocida";
-
-  let total = 0;
-  for (const d of disps) {
-    const montoDisp = Number(d.monto);
-    if (montoDisp <= 0) continue;
-    try {
-      const params: ParamsSchedule = {
-        monto: montoDisp,
-        fechaDisposicion: d.fecha,
-        fechaPrimerPago: addMesesHelper(d.fecha, mpp),
-        plazoMeses: Number(c.plazo_meses) || 60,
-        frecuencia: freq,
-        esquema: (c.esquema as EsquemaPreset) || "frances",
-        rateType: c.rate_type ?? null,
-        spread: c.spread != null ? Number(c.spread) : null,
-        fixedRate: c.fixed_rate != null ? Number(c.fixed_rate) : null,
-        convencionDias: (c.convencion_dias as ConvencionDias) || "ACT/360",
-        frecuenciaRevision: c.frecuencia_revision ?? null,
-        graciaMeses: Number(c.periodo_gracia_meses) || 0,
-        tipoGracia,
-        comisionApertura: 0, comisionIva: false, ivaIntereses: false,
-        baseCalendario, interesBase, supuestoForward: supuesto,
-        numPagosCapital: c.num_pagos_capital ?? null,
-      };
-      const schedule = generarSchedule(params, catalog);
-      total += saldoInsolutoCupones(schedule.cupones, fechaCorte, montoDisp);
-    } catch {
-      total += montoDisp; // conservative fallback
-    }
-  }
-  return Math.round(total * 100) / 100;
-}
-
-function addMesesHelper(fecha: string, meses: number): string {
-  const [y, m, d] = fecha.split("-").map(Number);
-  const total = y * 12 + (m - 1) + meses;
-  const ny = Math.floor(total / 12);
-  const nm = (total % 12) + 1;
-  const maxDay = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
-  const nd = Math.min(d, maxDay);
-  return `${ny}-${String(nm).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
-}
 
 function graciaLabel(c: Credito): string {
   if (!c.periodo_gracia_meses || c.tipo_gracia === "ninguna") return "—";
@@ -238,7 +181,7 @@ export default function Cartera() {
         for (const c of multiNoAmort) {
           const disps = ((dispData ?? []) as Disposicion[]).filter((d) => d.credito_id === c.id);
           if (disps.length > 0) {
-            si[c.id] = calcularSaldoLineaMultiple(c, disps, (catData ?? []) as RateCatalogRow[], hoy);
+            si[c.id] = calcularSaldoMultiDisposicion(c, disps, (catData ?? []) as RateCatalogRow[], hoy);
           }
         }
       }
