@@ -287,22 +287,10 @@ textarea {
 ::-webkit-scrollbar-thumb { background: #d1d9e3; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
 
-/* ===== Login / Auth theme ===== */
-:root {
-  --marino-900: #0A1628;
-  --marino-800: #0F1F3A;
-  --marino-700: #16294D;
-  --marino-600: #1F3661;
-  --champagne-500: #C9A961;
-  --champagne-400: #D4B97A;
-  --champagne-300: #E2CD9A;
-  --crema: #F5F0E6;
-  --texto-claro: #E8E2D4;
-  --texto-tenue: #A89E88;
-}
+/* ===== Login / Auth theme (light, fintech minimal) ===== */
 
 @keyframes loginFadeUp {
-  from { opacity: 0; transform: translateY(18px); }
+  from { opacity: 0; transform: translateY(14px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes loginShake {
@@ -312,65 +300,66 @@ textarea {
   60%  { transform: translateX(-5px); }
   80%  { transform: translateX(3px); }
 }
-@keyframes loginShimmer {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
-}
 
-.login-fade-1 { animation: loginFadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both; }
-.login-fade-2 { animation: loginFadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.35s both; }
-.login-fade-3 { animation: loginFadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.5s both; }
-.login-fade-4 { animation: loginFadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.65s both; }
+.login-fade-1 { animation: loginFadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both; }
+.login-fade-2 { animation: loginFadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.25s both; }
+.login-fade-3 { animation: loginFadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.35s both; }
+.login-fade-4 { animation: loginFadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.5s both; }
 .login-shake  { animation: loginShake 0.45s ease-in-out; }
 
-.btn-dorado {
+.login-input {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 15px;
+  font-family: var(--font-body);
+  color: #0a1628;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.login-input::placeholder { color: #c4cbd6; }
+.login-input:focus {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px rgba(200,132,31,0.1);
+}
+
+.login-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
   width: 100%;
-  padding: 13px 24px;
+  padding: 12px 24px;
   border: none;
   border-radius: 8px;
   font-family: var(--font-body);
   font-size: 15px;
   font-weight: 600;
-  color: var(--marino-900);
-  background: var(--champagne-500);
+  color: #ffffff;
+  background: var(--amber);
   cursor: pointer;
-  position: relative;
-  overflow: hidden;
-  transition: background 0.2s ease;
+  transition: background 0.15s ease;
 }
-.btn-dorado:hover { background: var(--champagne-400); }
-.btn-dorado:active { background: var(--champagne-300); }
-.btn-dorado:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-dorado::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.25) 50%, transparent 100%);
-  transform: translateX(-100%);
-}
-.btn-dorado:hover::after {
-  animation: loginShimmer 0.7s ease-in-out;
-}
+.login-btn:hover { background: var(--amber-hover); }
+.login-btn:active { background: var(--amber-deep); }
+.login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.login-input-wrap {
-  position: relative;
+.login-totp-box {
+  text-align: center;
+  font-size: 24px;
+  font-family: var(--font-display);
+  font-weight: 500;
+  color: #0a1628;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
-.login-input-wrap::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 0;
-  height: 1.5px;
-  background: var(--champagne-500);
-  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.login-input-wrap:focus-within::after {
-  width: 100%;
+.login-totp-box:focus {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 3px rgba(200,132,31,0.1);
 }
 
 /* Sidebar scrollbar (dark) */
