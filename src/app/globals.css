@@ -323,6 +323,16 @@ textarea {
 .login-fade-4 { animation: loginFadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 0.65s both; }
 .login-shake  { animation: loginShake 0.45s ease-in-out; }
 
+/* Offline pulse indicator — subtle breathing + expanding halo */
+@keyframes offlinePulse {
+  0%   { box-shadow: 0 0 0 0 rgba(229,72,77,0.45); opacity: 1; }
+  50%  { box-shadow: 0 0 0 6px rgba(229,72,77,0); opacity: 0.7; }
+  100% { box-shadow: 0 0 0 0 rgba(229,72,77,0); opacity: 1; }
+}
+.offline-pulse {
+  animation: offlinePulse 2s ease-in-out infinite;
+}
+
 .btn-dorado {
   display: inline-flex;
   align-items: center;

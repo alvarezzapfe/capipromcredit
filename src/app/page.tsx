@@ -10,6 +10,9 @@ type Paso = "credenciales" | "verificar";
 
 const NOISE_SVG = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E")`;
 
+/** Toggle para mostrar banner "PLATAFORMA OFFLINE". Cambiar a false para ocultar. */
+const PLATAFORMA_OFFLINE = process.env.NEXT_PUBLIC_PLATAFORMA_OFFLINE === "true" || true;
+
 export default function Acceso() {
   const router = useRouter();
   const isMobile = useIsMobile();
@@ -119,7 +122,7 @@ export default function Acceso() {
         }}
       >
         {/* Logo */}
-        <div className="login-fade-1" style={{ textAlign: "center", marginBottom: 40 }}>
+        <div className="login-fade-1" style={{ textAlign: "center", marginBottom: PLATAFORMA_OFFLINE ? 24 : 40 }}>
           <Image
             src="/CapiProm_Logo_Negativo.png"
             alt="CapiProm Credit"
@@ -129,6 +132,31 @@ export default function Acceso() {
             priority
           />
         </div>
+
+        {/* Banner offline */}
+        {PLATAFORMA_OFFLINE && (
+          <div className="login-fade-1" style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: 8,
+              padding: "7px 16px 7px 12px",
+              background: "rgba(229,72,77,0.08)",
+              border: "1px solid rgba(229,72,77,0.2)",
+              borderRadius: 999,
+            }}>
+              <span className="offline-pulse" style={{
+                width: 8, height: 8, borderRadius: "50%",
+                background: "#e5484d", flexShrink: 0,
+              }} />
+              <span style={{
+                fontSize: 12, fontWeight: 600, fontFamily: "var(--font-body)",
+                letterSpacing: "0.06em", textTransform: "uppercase",
+                color: "#e5484d",
+              }}>
+                Plataforma offline
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Card */}
         <div
