@@ -10,6 +10,9 @@ type Paso = "credenciales" | "verificar";
 
 const NOISE_SVG = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E")`;
 
+/** Aviso de pago pendiente. Controlado por env o constante. */
+const AVISO_PAGO = process.env.NEXT_PUBLIC_AVISO_PAGO === "true" || true;
+
 export default function Acceso() {
   const router = useRouter();
   const isMobile = useIsMobile();
@@ -119,7 +122,7 @@ export default function Acceso() {
         }}
       >
         {/* Logo */}
-        <div className="login-fade-1" style={{ textAlign: "center", marginBottom: 40 }}>
+        <div className="login-fade-1" style={{ textAlign: "center", marginBottom: AVISO_PAGO ? 24 : 40 }}>
           <Image
             src="/CapiProm_Logo_Negativo.png"
             alt="CapiProm Credit"
@@ -129,6 +132,32 @@ export default function Acceso() {
             priority
           />
         </div>
+
+        {/* Aviso de pago pendiente */}
+        {AVISO_PAGO && (
+          <div className="login-fade-1" style={{
+            marginBottom: 20,
+            padding: "12px 16px",
+            background: "rgba(229,72,77,0.07)",
+            border: "1px solid rgba(229,72,77,0.18)",
+            borderRadius: 10,
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+          }}>
+            <span className="aviso-pago-pulse" style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: "#e5484d", flexShrink: 0, marginTop: 4,
+            }} />
+            <p style={{
+              fontSize: 13, lineHeight: 1.55, color: "#f0a0a0",
+              fontFamily: "var(--font-body)", fontWeight: 500, margin: 0,
+            }}>
+              <strong style={{ fontWeight: 600, color: "#f0b0b0" }}>Servicio con pago pendiente.</strong>{" "}
+              Para evitar la suspensión, contacta a administración para regularizar tu cuenta.
+            </p>
+          </div>
+        )}
 
         {/* Card */}
         <div
