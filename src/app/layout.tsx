@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { getMarca } from "@/lib/marca";
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -30,14 +31,21 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const marca = await getMarca();
+
   return (
     <html lang="es">
       <head>
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `:root{--color-primario:${marca.color_primario};--color-acento:${marca.color_acento};}`,
+          }}
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           rel="preconnect"
